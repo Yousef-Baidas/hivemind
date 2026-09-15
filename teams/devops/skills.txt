@@ -1,0 +1,2 @@
+# one skill name per line; installer links these from ~/.agents/skills or ~/.claude/skills
+multi-stage-dockerfile

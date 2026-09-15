@@ -1,26 +1,32 @@
 # Teams
 
-A team is a **profile**, not an extra agent. It is a subagent definition in `agents/` that fixes three things: which skills preload, which gates count as green, and what its verifier checks. The lead tags each ticket with a profile and spawns `hive-<profile>-worker`; the verdict comes from `hive-<profile>-verifier`. No supervisor sits between the lead and the team. Adding one adds a hop and a context window and removes nothing.
+A team is a **profile**: a folder `teams/<profile>/` holding `PROFILE.md` (rules, green additions, verifier checklist) and `.claude/skills/` (that profile's skills, linked by the installer). Claude Code loads a nested `.claude/skills/` only when an agent first reads a file in that folder. Workers and verifiers read `teams/<profile>/PROFILE.md` as their first action; the lead never reads anything under `teams/`. So profile skills cost the lead nothing, not even their descriptions.
 
-The lead never reads a profile's skills. Only the worker and verifier carry them.
+The agent definitions in `agents/` (`hive-<profile>-worker`, `hive-<profile>-verifier`) are thin: model, tools, memory, and "read your PROFILE.md first". No supervisor sits between the lead and a profile. Adding one adds a hop and a context window and removes nothing.
 
 ## Profiles
 
-| Profile | Owns | Worker preloads | Verifier adds |
-|---|---|---|---|
-| `frontend` | UI, styling, client state, a11y | `web-design-guidelines`, `vercel-react-best-practices` | `impeccable` audit, a11y, no inline design drift |
-| `backend` | API, data, auth, jobs | `modern-javascript-patterns` or language equivalent, `sql-optimization` | `sql-code-review`, contract honoured, migrations reversible |
-| `devops` | CI, containers, deploy, env | `multi-stage-dockerfile` | secrets not in repo, CI green locally reproducible |
-| `security` | cross-cutting; a verifier only | – | `security-review` on any ticket touching auth, input, secrets, file or network I/O |
-| `qa` | cross-cutting; a verifier only | – | integration suite + e2e on `hive/<run>` at close; `playwright-best-practices` |
+| Profile | Owns | Kind |
+|---|---|---|
+| `frontend` | UI, styling, client state, a11y | worker + verifier |
+| `backend` | API, data, auth, jobs | worker + verifier |
+| `devops` | CI, containers, deploy config, env | worker (profile verifier: backend) |
+| `security` | cross-cutting | second verifier on tickets touching auth, input, secrets, file or network I/O |
+| `qa` | cross-cutting | once per wave on `hive/<run>` |
 
-Preload only the two or three skills the worker will use on every ticket. Everything else stays discoverable and is invoked on demand by the worker, never by the lead.
+Skills per profile live in `teams/<profile>/skills.txt`; `install.sh --project` links them. Keep the list to what the role uses on most tickets. Everything else stays global and on-demand.
 
 ## Routing
 
-- Tag at `/to-tickets`: `profile: frontend|backend|devops`. A ticket that needs two profiles is two tickets with a contract between them.
-- `security` is not a profile you tag. The lead attaches `hive-security-verifier` as a **second** verifier when the ticket touches auth, input parsing, secrets, file or network I/O. Both verdicts must be `MERGE`.
-- `qa` runs once per wave on the integration branch, not per ticket. The per-ticket gates already are the QA.
+- Tag at `/to-tickets`: `profile: frontend|backend|devops`. A ticket needing two profiles is two tickets with a contract between them.
+- `security` is never tagged. The lead attaches `hive-security-verifier` as a second verifier when the ticket touches auth, input parsing, secrets, file or network I/O. Both verdicts must be `MERGE`.
+- `qa` runs once per wave, not per ticket. Per-ticket gates already are the QA.
+
+## Confinement
+
+`~/.claude/skills/` loads in every session, lead included. To keep a domain skill out of the lead entirely, it must live only under `teams/<profile>/.claude/skills/`. `install.sh --project --confine` removes the global symlink for every skill it linked into a profile (symlinks only; real directories are left alone). The lead keeps: hivemind, the mattpocock skills, caveman, ponytail, rtk, context-mode, graphify.
+
+Bootstrap is the one exception: the scaffold ticket's worker may read several profiles' `PROFILE.md` to set up gates for each.
 
 ## What this does not buy
 
@@ -28,7 +34,6 @@ Verifiers catch contract violations, dead code, and known anti-patterns. Correct
 
 ## Adding a profile
 
-1. Copy `agents/hive-backend-worker.md` and `agents/hive-backend-verifier.md`, rename.
-2. Set `skills:` to at most three that the role uses every time. Find more on skills.sh; install with `npx skills add <owner/repo>`.
-3. Set `memory: project` on the verifier so recurring findings persist in `.claude/agent-memory/` without touching the lead.
-4. Add a row above. Re-run `install.sh`.
+1. `mkdir teams/<name>`; write `PROFILE.md` (owns, rules, green adds, verifier adds) and `skills.txt`.
+2. Copy `agents/hive-backend-worker.md` and `-verifier.md`, rename, point the first action at the new `PROFILE.md`.
+3. Add a row above. Re-run `install.sh --project`.

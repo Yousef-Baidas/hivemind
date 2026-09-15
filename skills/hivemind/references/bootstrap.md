@@ -28,6 +28,10 @@ Run before step 1 of the flow, every time. Detect the repo state, then take the 
 5. Existing branches or worktrees: list them, ask the user which are live, leave the rest alone. Never delete a branch you did not create.
 6. Now the flow from step 1.
 
+## Teams folder (both paths)
+
+`teams/<profile>/PROFILE.md` must exist for every profile the run will tag, with `.claude/skills/` linked beside it. Missing → tell the user to run `install.sh --project` from the hivemind checkout and stop. Do not read the `PROFILE.md` files yourself; `ls teams/` is enough.
+
 ## Ready
 
-Confirm in one line: gates green on `main`, `CONTEXT.md` present, `## Learned` present. Go.
+Confirm in one line: gates green on `main`, `CONTEXT.md` present, `## Learned` present, `teams/` present. Go.

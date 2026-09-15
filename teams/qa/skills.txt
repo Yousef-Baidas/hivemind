@@ -1,0 +1,6 @@
+# one skill name per line; installer links these from ~/.agents/skills or ~/.claude/skills
+playwright-best-practices
+playwright-cli
+javascript-typescript-jest
+python-testing-patterns
+rust-testing

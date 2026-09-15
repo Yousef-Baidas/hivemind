@@ -26,11 +26,11 @@ Step 0 of every run reads `references/bootstrap.md` and detects where the repo i
 
 ## Teams
 
-A team is a profile, not an extra agent: a subagent definition in `agents/` that fixes which skills preload, which gates count as green, and what its verifier checks. The lead tags each ticket `frontend|backend|devops`, spawns `hive-<profile>-worker`, and takes the verdict from `hive-<profile>-verifier`. Security and QA are verifiers only: security runs as a second verifier on tickets touching auth, input, secrets, or I/O; QA runs once per wave on the integration branch.
+A team is a folder, not an extra agent. `teams/<profile>/` holds `PROFILE.md` (rules, what green adds, what the verifier checks) and `.claude/skills/` with that profile's skills. Claude Code loads a nested `.claude/skills/` only when an agent first reads a file in that folder, so a worker's first action, "read `teams/frontend/PROFILE.md`", pulls in the frontend skills, and the lead, which never reads under `teams/`, pays nothing for them. Not even the descriptions.
 
-The lead never loads a profile's skills. Verifiers carry `memory: project`, so recurring findings persist in `.claude/agent-memory/` without touching the lead. Add a profile by copying two files in `agents/`; see `references/teams.md`.
+The lead tags each ticket `frontend|backend|devops`, spawns `hive-<profile>-worker`, and takes the verdict from `hive-<profile>-verifier`. Security and QA are verifiers only: security runs as a second verifier on tickets touching auth, input, secrets, or I/O; QA runs once per wave on the integration branch. Verifiers carry `memory: project`, so recurring findings persist in `.claude/agent-memory/` without touching the lead.
 
-Each agent's `skills:` list names skills from [skills.sh](https://skills.sh). Install what you're missing with `npx skills add <owner/repo>`; an absent skill is skipped, not fatal.
+`teams/<profile>/skills.txt` lists the skills; `install.sh --project` links them from `~/.agents/skills` (where `npx skills add` from [skills.sh](https://skills.sh) puts them) and reports what is missing. Add `--confine` to also drop those skills' global links, so they exist only inside their team folder. Add a profile with one folder and two thin agent files; see `references/teams.md`.
 
 ## Commit rules
 
@@ -61,7 +61,10 @@ Every agent commits with terse, professional [Conventional Commits](https://www.
 ```bash
 git clone https://github.com/Yousef-Baidas/hivemind.git
 cd hivemind
-./install.sh
+./install.sh                       # skill + agents for every repo
+cd /path/to/your/repo
+/path/to/hivemind/install.sh --project           # teams/ with linked skills
+/path/to/hivemind/install.sh --project --confine # ...and hide them from the lead
 ```
 
 Then add to your shell rc (`~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`):
@@ -76,7 +79,10 @@ set -gx CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS 1         # fish
 ```powershell
 git clone https://github.com/Yousef-Baidas/hivemind.git
 cd hivemind
-.\install.ps1
+.\install.ps1                      # skill + agents for every repo
+cd C:\path\to\your\repo
+C:\path\to\hivemind\install.ps1 -Project           # teams\ with linked skills
+C:\path\to\hivemind\install.ps1 -Project -Confine  # ...and hide them from the lead
 ```
 
 Then set the environment variable for your user:
@@ -91,11 +97,12 @@ Restart the terminal afterwards.
 
 1. Copy `skills/hivemind/` to `~/.claude/skills/hivemind/` (all repos) or `<repo>/.claude/skills/hivemind/` (one repo).
 2. Copy `agents/*.md` to `~/.claude/agents/` (or `<repo>/.claude/agents/`).
-3. Merge into `~/.claude/settings.json`:
+3. Copy `teams/` into your repo; for each `teams/<profile>/skills.txt` entry, symlink (or junction) the skill folder into `teams/<profile>/.claude/skills/<name>`.
+4. Merge into `~/.claude/settings.json`:
    ```json
    { "attribution": { "commit": "", "pr": "", "sessionUrl": false } }
    ```
-4. Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in your environment.
+5. Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in your environment.
 
 ## First run
 
@@ -111,19 +118,22 @@ skills/hivemind/
   references/roles.md      worker / verifier prompts, lead pre-dispatch check
   references/stack.md      who loads which tool, context budget, worktree lifecycle
   references/commits.md    commit message rules
-agents/
+agents/                    thin subagent definitions; each reads its PROFILE.md first
   hive-frontend-worker.md    hive-frontend-verifier.md
   hive-backend-worker.md     hive-backend-verifier.md
   hive-devops-worker.md
   hive-security-verifier.md  second verifier on sensitive tickets
   hive-qa-verifier.md        once per wave on the integration branch
+teams/<profile>/           copied into your repo by install.sh --project
+  PROFILE.md               rules, green additions, verifier checklist
+  skills.txt               skills to link into .claude/skills/ (git-ignored)
 install.sh       Linux / macOS installer
 install.ps1      Windows installer
 ```
 
 ## Uninstall
 
-Delete `~/.claude/skills/hivemind/` and `~/.claude/agents/hive-*.md`. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
+Delete `~/.claude/skills/hivemind/`, `~/.claude/agents/hive-*.md`, and `teams/` in any repo. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
 
 ## License
 

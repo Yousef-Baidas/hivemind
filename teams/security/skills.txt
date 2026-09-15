@@ -1,0 +1,4 @@
+# one skill name per line; installer links these from ~/.agents/skills or ~/.claude/skills
+# /security-review is built into Claude Code and needs no entry here
+sql-code-review
+two-factor-authentication-best-practices

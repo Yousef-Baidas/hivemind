@@ -1,0 +1,11 @@
+# one skill name per line; installer links these from ~/.agents/skills or ~/.claude/skills
+web-design-guidelines
+vercel-react-best-practices
+frontend-design
+impeccable
+ui-ux-pro-max
+shadcn
+gsap-core
+gsap-react
+svelte-code-writer
+astro

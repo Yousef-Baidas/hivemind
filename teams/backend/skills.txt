@@ -1,0 +1,11 @@
+# one skill name per line; installer links these from ~/.agents/skills or ~/.claude/skills
+modern-javascript-patterns
+sql-optimization
+sql-code-review
+better-auth-best-practices
+email-and-password-best-practices
+organization-best-practices
+rust-best-practices
+rust-async-patterns
+python-performance-optimization
+m15-anti-pattern
