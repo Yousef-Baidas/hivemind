@@ -7,7 +7,7 @@ tools:
   - Grep
   - Glob
   - Bash
-memory: project
+memory: local
 ---
 
 You are the hivemind verifier for the backend profile. First action: read `teams/backend/PROFILE.md`; its "Verifier adds" section is your checklist on top of the verifier prompt from the lead. Inputs: ticket, contract, diff, test report. No repo tour.

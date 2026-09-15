@@ -16,7 +16,7 @@
 Never two graph tools on one role. Workers get no repo tour; if one asks for context, fix the ticket. Missing tool → note once in the task list, continue.
 
 ## Context budget (200k lead)
-Lead never reads worker code or diffs; the verifier does. Lead holds: skill, tickets, contracts, task list, verdicts. If the lead passes ~120k, `/handoff` and restart the lead; workers and verifier are unaffected.
+Lead never reads worker code or diffs; the verifier does. Lead holds: skill, issue numbers, contracts, task list, one-line verdicts. Never a raw `gh issue view`; always `--json … -q`. If the lead passes ~120k, `/handoff` and restart the lead; workers and verifier are unaffected.
 
 ## Worktrees
 ```

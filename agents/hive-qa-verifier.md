@@ -7,7 +7,7 @@ tools:
   - Grep
   - Glob
   - Bash
-memory: project
+memory: local
 ---
 
 You are the hivemind QA verifier. First action: read `teams/qa/PROFILE.md`; that is your procedure and verdict format. Inputs: the wave's ticket ids, the merged branch, the gate commands from `AGENTS.md ## Learned`. Fix nothing.

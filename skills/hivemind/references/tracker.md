@@ -1,0 +1,34 @@
+# Tracker
+
+hivemind keeps no state in the repo. Tickets, milestones, worker reports, verdicts, review briefs, and the review queue live in the tracker. The repo gets code, tests, contracts, and the three docs a human would want anyway: `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`. Nothing else. `teams/` is config, shared like lint config. Agent memory is `local` (git-ignored).
+
+The Agent Teams task list is a runtime mirror; if it and the tracker disagree, the tracker wins. A session that dies loses nothing.
+
+Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the second column; the operations do not change.
+
+## Operations
+
+| Operation | GitHub |
+|---|---|
+| preflight | `gh auth status` and `gh repo view --json nameWithOwner -q .nameWithOwner`; either fails → stop, tell the human |
+| labels (once) | `gh label create hive`, `hive-review`, `needs-human`, `profile:frontend|backend|devops`, `difficulty:routine|standard|hard` (`--force`, ignore exists) |
+| milestone | `gh api repos/{owner}/{repo}/milestones -f title="<run>/<milestone>"` |
+| ticket | `gh issue create --title "<id>: <intent line>" --label hive,profile:<p>,difficulty:<d> --milestone "<run>/<m>" --body-file -` (body: intent, contract `file:line`, red test, owned paths, depends-on) |
+| ticket url → worker | the issue number is the ticket id; the worker gets the number, not the body pasted |
+| worker report | `gh issue comment <n> --body "DONE …"` / `NEEDS …` / `RED …` + diff and failing output |
+| verifier verdict | worker branch has a PR into `hive/<run>`: `gh pr review <pr> --approve --body "MERGE"` or `--request-changes --body "BACK-TO-WORKER …"`; `CONTRACT-WRONG` → comment on the issue, close PR |
+| merge | `gh pr merge <pr> --merge --delete-branch` into `hive/<run>` after the full suite; `gh issue close <n>` |
+| review brief | `gh issue create --title "Review: <run>/<milestone>" --label hive-review,needs-human --milestone … --body-file <brief>` |
+| evidence | text transcripts inline in the brief. Screenshots and recordings: push to orphan branch `hive-evidence/<run>` (`git push origin <tmp>:refs/heads/hive-evidence/<run>`), link raw URLs; branch deleted at close |
+| verdict | human comment on the review issue whose first line is `ACCEPT` or `CHANGES`; unattended guide comments `AUTO-ACCEPT` / `AUTO-HOLD` |
+| wait for verdict | poll every 30 s: `gh issue view <n> --json comments -q '[.comments[].body \| select(test("^(ACCEPT\|CHANGES\|AUTO-ACCEPT\|AUTO-HOLD)"))] \| last'` |
+| accept | remove `needs-human`, close the review issue, close the milestone |
+| queue (unattended) | review issues still labelled `needs-human`; `/hivemind-review` lists `gh issue list --label needs-human --state open` |
+| learned | still `AGENTS.md ## Learned`; that file is for the next human too |
+| close run | PR `hive/<run>` → `main`, body links the milestones; `git push origin --delete hive-evidence/<run>` after merge |
+
+Read tracker output with `--json … -q` always. A raw `gh issue view` costs the lead more than the ticket did.
+
+## Adding a tracker
+
+Copy this file to `tracker-<name>.md`, fill the second column, and set `tracker: <name>` in `AGENTS.md ## Learned`. The lead reads the matching file at step 0.
