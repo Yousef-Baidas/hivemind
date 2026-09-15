@@ -1,0 +1,27 @@
+# .github/workflows/hive-gates.yml — written by the hivemind scaffold ticket.
+# Every PR into hive/* runs the same gates the worker ran. Branch protection on
+# hive/<run> requires this job green plus one approving review (the verifier).
+name: hive-gates
+on:
+  pull_request:
+    branches: ["hive/**"]
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # EDIT: one setup action for the stack, e.g.
+      #   - uses: actions/setup-node@v4   with: { node-version: 22, cache: npm }
+      #   - uses: astral-sh/setup-uv@v5
+      #   - uses: dtolnay/rust-toolchain@stable
+      - run: echo EDIT-install     # npm ci | uv sync | cargo fetch
+      - run: echo EDIT-typecheck
+      - run: echo EDIT-lint
+      - run: echo EDIT-test
+      - run: echo EDIT-deadcode    # npx fallow dead-code | vulture . --min-confidence 80 | cargo machete
+      - name: commit messages
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=50
+          for c in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
+            git log -1 --format=%B "$c" > /tmp/msg && node .claude/hooks/commit-msg.js /tmp/msg || exit 1
+          done

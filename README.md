@@ -63,6 +63,20 @@ hivemind writes nothing to your repo but code, tests, contract stubs, and three 
 
 The tracker is GitHub via `gh` today. `references/tracker.md` is an operations table with one column per tracker; Jira or anything else slots in by filling the column.
 
+## Enforcement, not promises
+
+Rules in prompts drift; these are mechanical.
+
+- **Branch protection + CI.** The scaffold ticket adds `.github/workflows/hive-gates.yml`; every run protects `hive/<run>` so a PR needs the `gates` check green and the verifier's approving review before GitHub lets it merge.
+- **Path ownership.** A `PreToolUse` hook in each worker's worktree refuses any edit outside the ticket's owned paths and tells the worker to file `NEEDS` instead.
+- **Commit messages.** lefthook runs a commit-msg check: Conventional Commits, 72 chars, no AI trailer. CI re-checks every commit in the PR, so `--no-verify` does not help.
+- **Security.** The security verifier runs semgrep on the diff first and queries OSV for every `NEEDS dependency` before the human sees the request.
+- **Mutation testing.** Once per milestone, the QA pass mutates the changed files; a surviving mutant is a `WAVE-RED` ticket.
+- **Skill pinning.** `teams/skills-lock.json` pins every linked skill's content hash; the link script warns `drift:` when a machine differs.
+- **Cost.** Close reports cost per merged ticket from `ccusage`; OpenTelemetry export is one env var away for trends.
+
+Details and the exact commands: `skills/hivemind/references/enforcement.md`.
+
 ## Commit rules
 
 Every agent commits with terse, professional [Conventional Commits](https://www.conventionalcommits.org/). **No AI attribution, no `Co-Authored-By`, ever.** See [`skills/hivemind/references/commits.md`](skills/hivemind/references/commits.md). The installer sets `attribution` in `~/.claude/settings.json` so Claude Code stops offering the trailer.
@@ -155,6 +169,7 @@ skills/hivemind/
   references/tracker.md    where state lives: GitHub operations table, Jira slot
   references/roles.md      worker / verifier / guide / scout prompts, lead pre-dispatch check
   references/stack.md      who loads which tool, context budget, worktree lifecycle
+  references/enforcement.md  CI, branch protection, ownership hook, lefthook, semgrep, mutation, OSV, cost, skill lock
   references/commits.md    commit message rules
 skills/hivemind-review/
   SKILL.md                 the human's review session; writes the verdict the lead waits on
@@ -170,13 +185,15 @@ teams/                     copied into your repo by install.sh --project
   link-skills.sh / .ps1    links (or installs) each profile's skills
   <profile>/PROFILE.md     rules, green additions, verifier checklist
   <profile>/skills.txt     <owner/repo> <skill> lines; links land in .claude/skills/ (git-ignored)
+  skills-lock.json         content hash per linked skill, written by link-skills
+  templates/               hive-gates.yml, lefthook.yml, commit-msg.js, hive-owned-paths.js
 install.sh       Linux / macOS installer
 install.ps1      Windows installer
 ```
 
 ## Uninstall
 
-Delete `~/.claude/skills/hivemind/`, `~/.claude/skills/hivemind-review/`, `~/.claude/agents/hive-*.md`, and `teams/` in any repo. Open `hive-*` issues and labels stay on GitHub for you to close. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
+Delete `~/.claude/skills/hivemind/`, `~/.claude/skills/hivemind-review/`, `~/.claude/agents/hive-*.md`, and `teams/` in any repo; `.github/workflows/hive-gates.yml`, `lefthook.yml`, and `.claude/hooks/` are yours to keep or drop. Open `hive-*` issues and labels stay on GitHub for you to close. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
 
 ## License
 

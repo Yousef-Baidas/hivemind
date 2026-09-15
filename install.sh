@@ -55,13 +55,15 @@ if (( PROJECT )); then
   mkdir -p teams
   cp -n "$HERE/teams/.gitignore" teams/.gitignore 2>/dev/null || true
   cp "$HERE/teams/link-skills.sh" "$HERE/teams/link-skills.ps1" teams/
+  mkdir -p teams/templates
+  cp -R "$HERE/templates/." teams/templates/
   for dir in "$HERE"/teams/*/; do
     p="$(basename "$dir")"
     mkdir -p "teams/$p"
     [[ -f "teams/$p/PROFILE.md" ]] || cp "$dir/PROFILE.md" "teams/$p/PROFILE.md"
     [[ -f "teams/$p/skills.txt" ]] || cp "$dir/skills.txt" "teams/$p/skills.txt"
   done
-  echo "teams    -> $PWD/teams (PROFILE.md, skills.txt, link-skills.*)"
+  echo "teams    -> $PWD/teams (PROFILE.md, skills.txt, link-skills.*, templates/)"
   bash teams/link-skills.sh "${LINKFLAGS[@]}"
 fi
 

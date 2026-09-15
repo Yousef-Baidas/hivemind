@@ -48,13 +48,15 @@ if ($Project) {
     New-Item -ItemType Directory -Force -Path "teams" | Out-Null
     if (-not (Test-Path "teams\.gitignore")) { Copy-Item (Join-Path $Here "teams\.gitignore") "teams\.gitignore" }
     Copy-Item (Join-Path $Here "teams\link-skills.sh"), (Join-Path $Here "teams\link-skills.ps1") "teams\"
+    New-Item -ItemType Directory -Force -Path "teams\templates" | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $Here "templates\*") "teams\templates\"
     foreach ($dir in Get-ChildItem (Join-Path $Here "teams") -Directory) {
         $p = $dir.Name
         New-Item -ItemType Directory -Force -Path "teams\$p" | Out-Null
         if (-not (Test-Path "teams\$p\PROFILE.md")) { Copy-Item (Join-Path $dir.FullName "PROFILE.md") "teams\$p\PROFILE.md" }
         if (-not (Test-Path "teams\$p\skills.txt")) { Copy-Item (Join-Path $dir.FullName "skills.txt") "teams\$p\skills.txt" }
     }
-    Write-Host "teams    -> $(Get-Location)\teams (PROFILE.md, skills.txt, link-skills.*)"
+    Write-Host "teams    -> $(Get-Location)\teams (PROFILE.md, skills.txt, link-skills.*, templates\)"
     & ".\teams\link-skills.ps1" -Install:$Install -Confine:$Confine
 }
 
