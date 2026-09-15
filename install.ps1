@@ -3,13 +3,13 @@
 #   .\install.ps1                  skill + agents into ~\.claude (every repo)
 #   .\install.ps1 -Project         same into .\.claude of the current repo, plus
 #                                  .\teams\<profile>\ with skills linked per skills.txt
-#   .\install.ps1 -Project -Confine
-#                                  also remove the global ~\.claude\skills\<name>
-#                                  link for every skill linked into a profile
-param([switch]$Project, [switch]$Confine)
+#   .\install.ps1 -Project -Install  also `npx skills add` any skill not on this machine
+#   .\install.ps1 -Project -Confine  also remove the global ~\.claude\skills\<name>
+#                                    link for every linked skill, so the lead never sees it
+param([switch]$Project, [switch]$Install, [switch]$Confine)
 
 $ErrorActionPreference = "Stop"
-if ($Confine -and -not $Project) { throw "-Confine needs -Project" }
+if (($Install -or $Confine) -and -not $Project) { throw "-Install/-Confine need -Project" }
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Base = if ($Project) { Join-Path (Get-Location) ".claude" } else { Join-Path $HOME ".claude" }
 
@@ -41,43 +41,19 @@ fs.writeFileSync(p, JSON.stringify(s, null, 2) + "\n");
     Write-Host '  "attribution": { "commit": "", "pr": "", "sessionUrl": false }'
 }
 
-# teams (project only). Uses junctions, which need no admin rights.
+# teams (project only)
 if ($Project) {
     New-Item -ItemType Directory -Force -Path "teams" | Out-Null
     if (-not (Test-Path "teams\.gitignore")) { Copy-Item (Join-Path $Here "teams\.gitignore") "teams\.gitignore" }
-    $missing = @()
+    Copy-Item (Join-Path $Here "teams\link-skills.sh"), (Join-Path $Here "teams\link-skills.ps1") "teams\"
     foreach ($dir in Get-ChildItem (Join-Path $Here "teams") -Directory) {
         $p = $dir.Name
-        $skillsDir = "teams\$p\.claude\skills"
-        New-Item -ItemType Directory -Force -Path $skillsDir | Out-Null
+        New-Item -ItemType Directory -Force -Path "teams\$p" | Out-Null
         if (-not (Test-Path "teams\$p\PROFILE.md")) { Copy-Item (Join-Path $dir.FullName "PROFILE.md") "teams\$p\PROFILE.md" }
         if (-not (Test-Path "teams\$p\skills.txt")) { Copy-Item (Join-Path $dir.FullName "skills.txt") "teams\$p\skills.txt" }
-        $n = 0
-        foreach ($line in Get-Content "teams\$p\skills.txt") {
-            $name = $line.Trim()
-            if ($name -eq "" -or $name.StartsWith("#")) { continue }
-            $src = $null
-            foreach ($cand in @((Join-Path $HOME ".agents\skills\$name"), (Join-Path $HOME ".claude\skills\$name"))) {
-                if (Test-Path $cand -PathType Container) { $src = (Get-Item $cand).ResolvedTarget; if (-not $src) { $src = $cand }; break }
-            }
-            if (-not $src) { $missing += "${p}:$name"; continue }
-            $link = Join-Path $skillsDir $name
-            if (Test-Path $link) { Remove-Item -Force $link }
-            New-Item -ItemType Junction -Path $link -Target $src | Out-Null
-            $n++
-            if ($Confine) {
-                $g = Join-Path $HOME ".claude\skills\$name"
-                if ((Test-Path $g) -and (Get-Item $g).LinkType) { Remove-Item -Force $g }
-            }
-        }
-        Write-Host "teams/$p -> $n skills linked"
     }
-    if ($missing.Count) {
-        Write-Host ""
-        Write-Host "not installed on this machine (find them on https://skills.sh, then: npx skills add <owner/repo>):"
-        $missing | ForEach-Object { Write-Host "  $_" }
-    }
-    if ($Confine) { Write-Host "confined: linked skills removed from ~\.claude\skills (restart Claude Code)" }
+    Write-Host "teams    -> $(Get-Location)\teams (PROFILE.md, skills.txt, link-skills.*)"
+    & ".\teams\link-skills.ps1" -Install:$Install -Confine:$Confine
 }
 
 if ($env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS -ne "1") {

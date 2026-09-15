@@ -28,10 +28,16 @@ Run before step 1 of the flow, every time. Detect the repo state, then take the 
 5. Existing branches or worktrees: list them, ask the user which are live, leave the rest alone. Never delete a branch you did not create.
 6. Now the flow from step 1.
 
+## Conventions (both paths)
+
+`CONVENTIONS.md` missing → read `references/conventions.md`, run the interview, commit the file. Never start a ticket on assumed taste.
+
 ## Teams folder (both paths)
 
-`teams/<profile>/PROFILE.md` must exist for every profile the run will tag, with `.claude/skills/` linked beside it. Missing → tell the user to run `install.sh --project` from the hivemind checkout and stop. Do not read the `PROFILE.md` files yourself; `ls teams/` is enough.
+`teams/<profile>/PROFILE.md` must exist for every profile the run will tag. Missing → tell the user to run `install.sh --project` from the hivemind checkout and stop. Do not read the `PROFILE.md` files yourself; `ls teams/` is enough.
+
+Skills: if any `teams/<profile>/skills.txt` is still the shipped default (header says so) or the human says "refresh skills", spawn `hive-scout`. It reads the stack and rewrites the lists from skills.sh ranked by installs. Print its report, ask the human to approve, then the human runs `bash teams/link-skills.sh --install --confine` (`.\teams\link-skills.ps1 -Install -Confine` on Windows). Third-party skill text runs inside every worker; the human decides what gets in.
 
 ## Ready
 
-Confirm in one line: gates green on `main`, `CONTEXT.md` present, `## Learned` present, `teams/` present. Go.
+Confirm in one line: gates green on `main`, `CONTEXT.md`, `CONVENTIONS.md`, `## Learned`, `teams/` with links present. Go.

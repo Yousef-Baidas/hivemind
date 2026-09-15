@@ -1,6 +1,8 @@
-# one skill name per line; installer links these from ~/.agents/skills or ~/.claude/skills
-playwright-best-practices
-playwright-cli
-javascript-typescript-jest
-python-testing-patterns
-rust-testing
+# <owner/repo> <skill-name>   one per line; `bash teams/link-skills.sh` links them.
+# Defaults below are a starting set. hive-scout rewrites this file for your stack
+# from https://skills.sh (ranked by installs) during bootstrap; human approves the list.
+microsoft/playwright-cli playwright-cli
+currents-dev/playwright-best-practices-skill playwright-best-practices
+github/awesome-copilot javascript-typescript-jest
+wshobson/agents python-testing-patterns
+affaan-m/ecc rust-testing

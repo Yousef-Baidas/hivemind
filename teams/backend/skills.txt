@@ -1,11 +1,13 @@
-# one skill name per line; installer links these from ~/.agents/skills or ~/.claude/skills
-modern-javascript-patterns
-sql-optimization
-sql-code-review
-better-auth-best-practices
-email-and-password-best-practices
-organization-best-practices
-rust-best-practices
-rust-async-patterns
-python-performance-optimization
-m15-anti-pattern
+# <owner/repo> <skill-name>   one per line; `bash teams/link-skills.sh` links them.
+# Defaults below are a starting set. hive-scout rewrites this file for your stack
+# from https://skills.sh (ranked by installs) during bootstrap; human approves the list.
+wshobson/agents modern-javascript-patterns
+github/awesome-copilot sql-optimization
+github/awesome-copilot sql-code-review
+better-auth/skills better-auth-best-practices
+better-auth/skills email-and-password-best-practices
+better-auth/skills organization-best-practices
+apollographql/skills rust-best-practices
+wshobson/agents rust-async-patterns
+actionbook/rust-skills m15-anti-pattern
+wshobson/agents python-performance-optimization

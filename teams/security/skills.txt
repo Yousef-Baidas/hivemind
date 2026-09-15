@@ -1,4 +1,5 @@
-# one skill name per line; installer links these from ~/.agents/skills or ~/.claude/skills
-# /security-review is built into Claude Code and needs no entry here
-sql-code-review
-two-factor-authentication-best-practices
+# <owner/repo> <skill-name>   one per line; `bash teams/link-skills.sh` links them.
+# Claude Code's built-in /security-review is always available; these add stack-specific checks.
+# hive-scout rewrites this file for your stack during bootstrap; human approves the list.
+github/awesome-copilot sql-code-review
+better-auth/skills two-factor-authentication-best-practices

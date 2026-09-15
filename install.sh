@@ -4,22 +4,21 @@
 #   ./install.sh                 skill + agents into ~/.claude (every repo)
 #   ./install.sh --project       same into ./.claude of the current repo, plus
 #                                ./teams/<profile>/ with skills linked per skills.txt
-#   ./install.sh --project --confine
-#                                also remove the global ~/.claude/skills/<name>
-#                                symlink for every skill linked into a profile,
-#                                so the lead never sees it
+#   ./install.sh --project --install   also `npx skills add` any skill not on this machine
+#   ./install.sh --project --confine   also remove the global ~/.claude/skills/<name>
+#                                      symlink for every linked skill, so the lead never sees it
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT=0; CONFINE=0
+PROJECT=0; LINKFLAGS=()
 for a in "$@"; do
   case "$a" in
     --project) PROJECT=1 ;;
-    --confine) CONFINE=1 ;;
+    --install|--confine) LINKFLAGS+=("$a") ;;
     *) echo "unknown flag: $a" >&2; exit 2 ;;
   esac
 done
-if (( CONFINE && !PROJECT )); then echo "--confine needs --project" >&2; exit 2; fi
+if (( ${#LINKFLAGS[@]} && !PROJECT )); then echo "${LINKFLAGS[*]} needs --project" >&2; exit 2; fi
 
 if (( PROJECT )); then BASE="$PWD/.claude"; else BASE="$HOME/.claude"; fi
 
@@ -53,34 +52,15 @@ fi
 if (( PROJECT )); then
   mkdir -p teams
   cp -n "$HERE/teams/.gitignore" teams/.gitignore 2>/dev/null || true
-  missing=()
+  cp "$HERE/teams/link-skills.sh" "$HERE/teams/link-skills.ps1" teams/
   for dir in "$HERE"/teams/*/; do
     p="$(basename "$dir")"
-    mkdir -p "teams/$p/.claude/skills"
+    mkdir -p "teams/$p"
     [[ -f "teams/$p/PROFILE.md" ]] || cp "$dir/PROFILE.md" "teams/$p/PROFILE.md"
     [[ -f "teams/$p/skills.txt" ]] || cp "$dir/skills.txt" "teams/$p/skills.txt"
-    n=0
-    while read -r name; do
-      [[ -z "$name" || "$name" == \#* ]] && continue
-      src=""
-      for cand in "$HOME/.agents/skills/$name" "$HOME/.claude/skills/$name"; do
-        [[ -d "$cand" ]] && { src="$(cd "$cand" && pwd -P)"; break; }
-      done
-      if [[ -z "$src" ]]; then missing+=("$p:$name"); continue; fi
-      ln -sfn "$src" "teams/$p/.claude/skills/$name"
-      n=$((n+1))
-      if (( CONFINE )) && [[ -L "$HOME/.claude/skills/$name" ]]; then
-        rm "$HOME/.claude/skills/$name"
-      fi
-    done < "teams/$p/skills.txt"
-    echo "teams/$p -> $n skills linked"
   done
-  if (( ${#missing[@]} )); then
-    echo
-    echo "not installed on this machine (find them on https://skills.sh, then: npx skills add <owner/repo>):"
-    printf '  %s\n' "${missing[@]}"
-  fi
-  (( CONFINE )) && echo "confined: linked skills removed from ~/.claude/skills (restart Claude Code)"
+  echo "teams    -> $PWD/teams (PROFILE.md, skills.txt, link-skills.*)"
+  bash teams/link-skills.sh "${LINKFLAGS[@]}"
 fi
 
 if [[ "${CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-}" != "1" ]]; then

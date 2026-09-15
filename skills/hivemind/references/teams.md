@@ -13,8 +13,10 @@ The agent definitions in `agents/` (`hive-<profile>-worker`, `hive-<profile>-ver
 | `devops` | CI, containers, deploy config, env | worker (profile verifier: backend) |
 | `security` | cross-cutting | second verifier on tickets touching auth, input, secrets, file or network I/O |
 | `qa` | cross-cutting | once per wave on `hive/<run>` |
+| `guide` | cross-cutting | human-review brief per milestone; see `review.md` |
+| `scout` | cross-cutting | picks each profile's skills at bootstrap |
 
-Skills per profile live in `teams/<profile>/skills.txt`; `install.sh --project` links them. Keep the list to what the role uses on most tickets. Everything else stays global and on-demand.
+Skills per profile live in `teams/<profile>/skills.txt`, one `<owner/repo> <skill-name>` per line, resolved from [skills.sh](https://skills.sh). The shipped lists are defaults; `hive-scout` rewrites them for the repo's stack at bootstrap, ranked by installs, and the human approves before `teams/link-skills.sh --install` pulls them in. Keep each list to what the role uses on most tickets, eight at most. Everything else stays global and on-demand.
 
 ## Routing
 
@@ -24,7 +26,7 @@ Skills per profile live in `teams/<profile>/skills.txt`; `install.sh --project` 
 
 ## Confinement
 
-`~/.claude/skills/` loads in every session, lead included. To keep a domain skill out of the lead entirely, it must live only under `teams/<profile>/.claude/skills/`. `install.sh --project --confine` removes the global symlink for every skill it linked into a profile (symlinks only; real directories are left alone). The lead keeps: hivemind, the mattpocock skills, caveman, ponytail, rtk, context-mode, graphify.
+`~/.claude/skills/` loads in every session, lead included. To keep a domain skill out of the lead entirely, it must live only under `teams/<profile>/.claude/skills/`. `teams/link-skills.sh --confine` removes the global symlink for every skill it linked into a profile (symlinks only; real directories are left alone). The lead keeps: hivemind, the mattpocock skills, caveman, ponytail, rtk, context-mode, graphify.
 
 Bootstrap is the one exception: the scaffold ticket's worker may read several profiles' `PROFILE.md` to set up gates for each.
 
@@ -36,4 +38,4 @@ Verifiers catch contract violations, dead code, and known anti-patterns. Correct
 
 1. `mkdir teams/<name>`; write `PROFILE.md` (owns, rules, green adds, verifier adds) and `skills.txt`.
 2. Copy `agents/hive-backend-worker.md` and `-verifier.md`, rename, point the first action at the new `PROFILE.md`.
-3. Add a row above. Re-run `install.sh --project`.
+3. Add a row above. Run `bash teams/link-skills.sh --install`.
