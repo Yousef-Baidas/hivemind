@@ -26,7 +26,7 @@ Any of these produce the verdict comment; the lead does not care which.
 
 | Channel | How |
 |---|---|
-| review session | second terminal, `claude`, `/hivemind-review`. Fresh Sonnet session with the issue, the diff, and the evidence; chats, runs steps on request, posts the verdict when told. Zero lead tokens. |
+| review session | second terminal, `claude --model sonnet`, `/hivemind-review`. Fresh session with the issue, the diff, and the evidence; chats, runs steps on request, posts the verdict when told. Zero lead tokens. |
 | phone | `/remote-control` on the review session, or the GitHub app: read the issue, comment `ACCEPT`. |
 | issue only | read the brief on GitHub, comment `ACCEPT` or `CHANGES` + lines. No AI involved. |
 | evidence only | open the linked screenshots, then comment. |

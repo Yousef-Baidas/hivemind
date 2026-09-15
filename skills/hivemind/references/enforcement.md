@@ -10,12 +10,14 @@ Scaffold ticket: copy `teams/templates/ci/hive-gates.yml` to `.github/workflows/
 gh api -X PUT "repos/{owner}/{repo}/branches/hive%2F<run>/protection" \
   --input - <<'EOF'
 {"required_status_checks":{"strict":true,"contexts":["gates"]},
- "required_pull_request_reviews":{"required_approving_review_count":1},
+ "required_pull_request_reviews":null,
  "enforce_admins":false,"restrictions":null}
 EOF
 ```
 
-Now `MERGE` is enforced by GitHub: no green CI or no approving review, no merge. Verifier reads `gh pr checks <pr> --json name,state` instead of re-running the suite; it re-runs only what it needs to reproduce a finding. Delete the protection with `gh api -X DELETE …/protection` at close before deleting the branch.
+Now no PR merges into `hive/<run>` without the `gates` check green. Required reviews are not set: worker, verifier, and lead share one `gh` login, and GitHub refuses `--approve` on your own PR, so the verifier's `MERGE` is a review comment and a record, not a lock. Verifier reads `gh pr checks <pr> --json name,state` instead of re-running the suite; it re-runs only what it needs to reproduce a finding, or the whole suite when the checks list is empty.
+
+The PUT fails on a private repo on GitHub Free (403) and `gates` never reports when Actions is disabled. Either → write `protection: none` under `AGENTS.md ## Learned` once, tell the human once, continue with prompt-enforced gates; the verifier then runs the suite itself. Delete the protection with `gh api -X DELETE …/protection` at close before deleting the branch.
 
 ## 2. Path ownership hook
 
@@ -28,7 +30,7 @@ cp teams/templates/hooks/settings.local.json <wt>/.claude/settings.local.json
 printf '%s\n' <owned paths and globs> > <wt>/.claude/hive-owned
 ```
 
-Every `Edit`/`Write` outside the list is refused at the tool level with the `NEEDS` instruction as the error. `settings.local.json` and `.claude/hive-owned` are untracked and die with the worktree. No list file → hook allows all, so the lead, verifiers, and bootstrap are unaffected.
+Every `Edit`/`Write` outside the list is refused at the tool level with the `NEEDS` instruction as the error. `Bash` writes (`sed -i`, redirects) are not caught; the verifier's `gh pr diff <pr> --name-only` against the owned paths is the backstop and any file outside them is `BACK-TO-WORKER`. `settings.local.json` and `.claude/hive-owned` are untracked and die with the worktree. No list file → hook allows all, so the lead, verifiers, and bootstrap are unaffected.
 
 ## 3. lefthook + commit-msg check
 

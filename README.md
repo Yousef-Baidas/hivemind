@@ -1,6 +1,6 @@
 # hivemind
 
-A Claude Code skill that runs one ticket through a **lead that only plans**, **parallel workers in git worktrees**, and **one verifier**. Agents never talk to each other; they share a task list, interface contracts, and test reports.
+A Claude Code skill that runs one ticket through a **lead that only plans**, **parallel workers in git worktrees**, and **a verifier per ticket** (two when the ticket touches auth, input, secrets, or I/O). Agents never talk to each other; they share a task list, interface contracts, and test reports.
 
 Built on top of the [mattpocock-skills](https://github.com/mattpocock/skills) workflow (`/grilling` → `/to-spec` → `/to-tickets` → `/tdd` → `/code-review`) and Claude Code's Agent Teams.
 
@@ -14,7 +14,7 @@ The usual multi-agent loop bleeds tokens in three places: the lead sits inside t
 - Independent tickets run in parallel, one git worktree each, merged sequentially.
 - Models are routed by difficulty: Haiku for mechanical work, Sonnet for well-specified units, Opus for ambiguous units and review, Fable as lead.
 
-Context cost: the description is ~60 tokens per session. The body loads only on `/hivemind` (~1,000 tokens). `references/roles.md` loads at spawn time, `references/stack.md` on first run in a repo, `references/commits.md` when an agent commits. A full run costs the lead under ~1,500 tokens of skill text.
+Context cost: the description is ~60 tokens per session. The body loads only on `/hivemind` (~1,000 tokens). `references/roles.md` loads at spawn time, `references/stack.md` on first run in a repo, `references/commits.md` when an agent commits. Every other reference loads only at the step that names it, so the lead pays for what the run actually uses.
 
 ## Works from any project state
 
@@ -67,7 +67,7 @@ The tracker is GitHub via `gh` today. `references/tracker.md` is an operations t
 
 Rules in prompts drift; these are mechanical.
 
-- **Branch protection + CI.** The scaffold ticket adds `.github/workflows/hive-gates.yml`; every run protects `hive/<run>` so a PR needs the `gates` check green and the verifier's approving review before GitHub lets it merge.
+- **Branch protection + CI.** The scaffold ticket adds `.github/workflows/hive-gates.yml`; every run protects `hive/<run>` so a PR needs the `gates` check green before GitHub lets it merge. The verifier's `MERGE` is a review comment on the PR (one login cannot approve its own PR).
 - **Path ownership.** A `PreToolUse` hook in each worker's worktree refuses any edit outside the ticket's owned paths and tells the worker to file `NEEDS` instead.
 - **Commit messages.** lefthook runs a commit-msg check: Conventional Commits, 72 chars, no AI trailer. CI re-checks every commit in the PR, so `--no-verify` does not help.
 - **Security.** The security verifier runs semgrep on the diff first and queries OSV for every `NEEDS dependency` before the human sees the request.
@@ -91,7 +91,7 @@ Every agent commits with terse, professional [Conventional Commits](https://www.
    ```
    /plugin install mattpocock-skills@claude-plugins-official
    ```
-   Cherry-picking instead? You need: `setup-matt-pocock-skills`, `grilling`, `grill-with-docs`, `to-spec`, `to-tickets`, `implement`, `tdd`, `code-review`, `resolving-merge-conflicts`, `handoff`.
+   Cherry-picking instead? You need: `setup-matt-pocock-skills`, `grilling`, `grill-with-docs`, `domain-modeling`, `codebase-design`, `wayfinder`, `to-spec`, `to-tickets`, `implement`, `tdd`, `code-review`, `resolving-merge-conflicts`, `handoff`.
 4. Recommended companions (each is its own install; the skill works without them but saves less):
    - [caveman](https://github.com/JuliusBrussee/caveman) — terse agent output
    - [ponytail](https://github.com/DietrichGebert/ponytail) — minimal code
@@ -99,6 +99,7 @@ Every agent commits with terse, professional [Conventional Commits](https://www.
    - [context-mode](https://github.com/mksglu/context-mode) — sandboxed analysis
    - Claude Code LSP plugin: `/plugin install <language>-lsp@claude-plugins-official`
    - [graphify](https://github.com/safishamsi/graphify) — planning-stage orientation only
+   - code-review-graph — verifier blast radius; Serena — alternative to the LSP plugin
    - Gates: `npx fallow` (JS/TS, no install), `vulture-rs` (Python), `cargo machete` (Rust)
 
 ### Linux / macOS

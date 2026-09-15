@@ -20,12 +20,13 @@ Lead never reads worker code or diffs; the verifier does. Lead holds: skill, iss
 
 ## Worktrees
 ```
-git checkout -b hive/<run> main
-git worktree add ../<repo>-hive/<id> -b hive/<run>/<id> hive/<run>
+git checkout -b hive/<run> main && git push -u origin hive/<run>
+git worktree add ../<repo>-hive/<id> -b hive/<run>-<id> hive/<run>
 git rev-parse hive/<run>   # fork point, record in task
 ```
+Worker branches are `hive/<run>-<id>`, never `hive/<run>/<id>`: git cannot hold a ref and a ref-directory of the same name.
 Per worktree: own dev-server port (`.env.local`), own DB/container/SQLite, own install dir. Shared services are why "passes alone, fails together".
 
-Merge: `git checkout hive/<run> && git merge --no-ff hive/<run>/<id>` then full suite. Every merge, not just the last. Then `git worktree remove` + `git branch -d`.
+Merge: `git worktree remove ../<repo>-hive/<id>` (the branch cannot be deleted while checked out), then `gh pr merge <pr> --merge --delete-branch`, then `git checkout hive/<run> && git pull` and the full suite. Every merge, not just the last.
 
 More than ~6 parallel workers or multi-repo → hand worktree lifecycle to Composio Agent Orchestrator or Conductor; keep this skill for judgement.

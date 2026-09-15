@@ -26,7 +26,7 @@ if (( PROJECT )); then BASE="$PWD/.claude"; else BASE="$HOME/.claude"; fi
 mkdir -p "$BASE/skills" "$BASE/agents"
 for s in hivemind hivemind-review; do
   rm -rf "$BASE/skills/$s"
-  cp -R "$HERE/skills/$s" "$BASE/skills/$s"
+  cp -R "$HERE/skills/$s" "$BASE/skills/$s"; rm -rf "$BASE/skills/$s/.impeccable"
 done
 rm -f "$BASE"/agents/hive-*.md
 cp "$HERE"/agents/hive-*.md "$BASE/agents/"

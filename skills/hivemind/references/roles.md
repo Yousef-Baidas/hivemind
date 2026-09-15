@@ -2,7 +2,7 @@
 
 ## Worker
 ```
-Ticket #<n> (gh issue view <n> --json body -q .body), worktree <path>, branch <branch>. Nothing outside this ticket exists.
+Ticket #<n> (gh issue view <n> --json body -q .body), worktree <path>, branch hive/<run>-<id>. Nothing outside this ticket exists.
 Contract (committed, don't change signatures): <file:line pointers>
 Red test: <file::name>
 You own: <paths>. Anything else is read-only and the edit hook refuses it; need it → `gh issue comment <n> --body "NEEDS <file>: <why>"` and stop. New package → `NEEDS dependency <ecosystem>/<name>@<version>: <why>` and stop; never install one.
@@ -17,9 +17,9 @@ CONTEXT.md vocabulary. Caveman full. Ponytail full.
 
 ## Verifier
 ```
-Ticket #<n>, PR #<pr>. No repo tour. Inputs: issue body, contract, `gh pr diff <pr>`, `gh pr checks <pr> --json name,state`, worker's DONE comment. CI red → BACK-TO-WORKER with the failing check named; do not re-run the suite yourself.
+Ticket #<n>, PR #<pr>. No repo tour. Inputs: issue body, contract, `gh pr diff <pr>`, `gh pr checks <pr> --json name,state`, worker's DONE comment. CI red → BACK-TO-WORKER with the failing check named; no checks listed → run the suite yourself. `gh pr diff <pr> --name-only` outside the ticket's owned paths → BACK-TO-WORKER.
 /code-review (standards + spec as parallel sub-agents). code-review-graph blast radius on changed exports. <fallow dupes | vulture> on the diff. Diff against CONVENTIONS.md; a deviation is BACK-TO-WORKER with the rule quoted, never a nit.
-One verdict, as a PR review (`gh pr review <pr> --approve|--request-changes --body`), one line mirrored to the task list:
+One verdict, as a PR review (`gh pr review <pr> --comment|--request-changes --body`; `--approve` fails on your own PR), one line mirrored to the task list:
 MERGE #<n>
 BACK-TO-WORKER #<n>  1. <file:line> wrong → green looks like  2. ...
 CONTRACT-WRONG #<n>  <one paragraph>  (comment on the issue, close the PR)
@@ -29,7 +29,7 @@ Fix nothing. Out-of-ticket refactor spotted → one line under the verdict for t
 ## Guide (human review gate)
 ```
 Run <run>, milestone <name>, mode <attended|unattended>. Tickets: #<n>, ... Diff: <merge-base>..hive/<run>. QA: WAVE-GREEN. Gates: <commands>.
-Open the review issue with brief and evidence per your agent instructions, post REVIEW <url> to the task, exit.
+Open the review issue with brief and evidence per your agent instructions, post REVIEW <milestone> <url> to the task, exit.
 ```
 
 ## Scout (bootstrap)

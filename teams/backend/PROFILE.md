@@ -5,7 +5,7 @@ Reading this file loads the skills in `teams/backend/.claude/skills/`. Read it o
 Owns: API, data, auth, background jobs.
 
 Rules:
-- Contract signatures are frozen. Need a change: `CONTRACT-WRONG` in the task, stop.
+- Contract signatures are frozen. Need a change: comment `NEEDS contract <file:line>: <why>` on the issue, stop.
 - Every migration has a down. Every external call has a timeout.
 - Validate at the boundary once; trust typed data inside.
 - Language and library skills (`rust-*`, `python-*`, `better-auth-*`) apply only when owned paths use them.

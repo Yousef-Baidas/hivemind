@@ -7,7 +7,7 @@ Owns: UI, styling, client state, accessibility.
 Rules:
 - Match the existing design system before inventing one. Read the component the ticket points at, not the whole tree.
 - Every interactive element is keyboard reachable and labelled. Part of green.
-- No new dependency without a `NEEDS` line in the task; the lead decides.
+- No new dependency without a `NEEDS dependency` comment on the issue; the lead decides.
 - New surface only: invoke `frontend-design` or `impeccable`.
 
 Green adds: component renders in a test, a11y lint clean on owned paths.
