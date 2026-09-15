@@ -29,8 +29,8 @@ Fix nothing. Out-of-ticket refactor spotted → one line under the verdict for t
 
 ## Guide (human review gate)
 ```
-Run <run>, milestone <name>. Tickets: <id: intent, ...>. Diff: <merge-base>..hive/<run>. QA: WAVE-GREEN. Gates: <commands>.
-Write .hive/reviews/<run>-<name>.md per your agent instructions. Stay alive for questions until the verdict.
+Run <run>, milestone <name>, mode <attended|unattended>. Tickets: <id: intent, ...>. Diff: <merge-base>..hive/<run>. QA: WAVE-GREEN. Gates: <commands>.
+Write .hive/reviews/<run>-<name>.md and evidence per your agent instructions, commit the brief, post REVIEW to the task, exit.
 ```
 
 ## Scout (bootstrap)

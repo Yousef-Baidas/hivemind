@@ -15,12 +15,14 @@ $Base = if ($Project) { Join-Path (Get-Location) ".claude" } else { Join-Path $H
 
 # skill + agents
 New-Item -ItemType Directory -Force -Path (Join-Path $Base "skills"), (Join-Path $Base "agents") | Out-Null
-$Dest = Join-Path $Base "skills\hivemind"
-if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
-Copy-Item -Recurse (Join-Path $Here "skills\hivemind") $Dest
+foreach ($s in @("hivemind", "hivemind-review")) {
+    $Dest = Join-Path $Base "skills\$s"
+    if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
+    Copy-Item -Recurse (Join-Path $Here "skills\$s") $Dest
+}
 Get-ChildItem (Join-Path $Base "agents") -Filter "hive-*.md" -ErrorAction SilentlyContinue | Remove-Item -Force
 Copy-Item (Join-Path $Here "agents\hive-*.md") (Join-Path $Base "agents")
-Write-Host "skill    -> $Dest"
+Write-Host "skills   -> $Base\skills\{hivemind,hivemind-review}"
 Write-Host "agents   -> $Base\agents\hive-*.md"
 
 # attribution off

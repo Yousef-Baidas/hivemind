@@ -24,11 +24,13 @@ if (( PROJECT )); then BASE="$PWD/.claude"; else BASE="$HOME/.claude"; fi
 
 # skill + agents
 mkdir -p "$BASE/skills" "$BASE/agents"
-rm -rf "$BASE/skills/hivemind"
-cp -R "$HERE/skills/hivemind" "$BASE/skills/hivemind"
+for s in hivemind hivemind-review; do
+  rm -rf "$BASE/skills/$s"
+  cp -R "$HERE/skills/$s" "$BASE/skills/$s"
+done
 rm -f "$BASE"/agents/hive-*.md
 cp "$HERE"/agents/hive-*.md "$BASE/agents/"
-echo "skill    -> $BASE/skills/hivemind"
+echo "skills   -> $BASE/skills/{hivemind,hivemind-review}"
 echo "agents   -> $BASE/agents/hive-*.md"
 
 # attribution off

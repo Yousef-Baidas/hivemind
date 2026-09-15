@@ -38,6 +38,10 @@ Run before step 1 of the flow, every time. Detect the repo state, then take the 
 
 Skills: if any `teams/<profile>/skills.txt` is still the shipped default (header says so) or the human says "refresh skills", spawn `hive-scout`. It reads the stack and rewrites the lists from skills.sh ranked by installs. Print its report, ask the human to approve, then the human runs `bash teams/link-skills.sh --install --confine` (`.\teams\link-skills.ps1 -Install -Confine` on Windows). Third-party skill text runs inside every worker; the human decides what gets in.
 
+## Review folder (both paths)
+
+`mkdir -p .hive/reviews`; add `.hive/reviews/*/evidence/` to `.gitignore`. Briefs and verdicts are committed on `hive/<run>`; evidence stays local.
+
 ## Ready
 
 Confirm in one line: gates green on `main`, `CONTEXT.md`, `CONVENTIONS.md`, `## Learned`, `teams/` with links present. Go.

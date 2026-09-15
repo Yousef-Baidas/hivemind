@@ -42,7 +42,20 @@ Bootstrap refuses to start a ticket without `CONVENTIONS.md` at the repo root. M
 
 ## Human in the loop
 
-Agents verify tickets; you verify milestones. At `/to-tickets` the lead groups tickets into milestones, one user-visible feature each; a single-task run is one milestone. When a milestone merges and QA is green, the lead spawns `hive-guide`, which writes a brief under 60 lines: what changed, exact steps to verify it in under ten minutes, the three to five places an AI most plausibly got wrong, convention deviations, and the verdict line. The lead prints it and stops. Ask the guide anything; the lead relays. Reply `ACCEPT` to move on or `CHANGES: …` to turn each line into a ticket and run the loop again. Merging `hive/<run>` into `main` is yours too; the lead opens the PR. See `references/review.md`.
+Agents verify tickets; you verify milestones. At `/to-tickets` the lead groups tickets into milestones, one user-visible feature each; a single-task run is one milestone. When a milestone merges and QA is green, the lead spawns `hive-guide`, which writes `.hive/reviews/<id>.md`, a brief under 60 lines: what changed, exact steps to verify it in under ten minutes, the three to five places an AI most plausibly got wrong, convention deviations, and what evidence it captured (gate output, Playwright screenshots or recordings of each step, CLI transcripts). Then the lead sends a notification and blocks on `.hive/reviews/<id>.verdict`. It does not talk you through the review; it has no diff and every relayed line costs it twice.
+
+You review through whichever channel fits:
+
+- **Review session** — second terminal, `claude`, `/hivemind-review`. A fresh session with the brief, the diff, and the evidence. Ask anything, have it run steps, then say accept or name the problems; it writes the verdict. Zero lead tokens.
+- **Phone** — `/remote-control` on that review session.
+- **File** — read the brief, write `ACCEPT` or `CHANGES` plus one line per problem into the verdict file. No AI involved.
+- **Evidence only** — flip through `evidence/` screenshots, then write the file.
+
+`ACCEPT` moves on; `CHANGES` turns each line into a ticket and runs the loop again. Merging `hive/<run>` into `main` is always yours; the lead opens the PR.
+
+### Overnight
+
+Say you are going to sleep, away, or not to wait. The lead prints one warning, what you lose and what stays protected, and continues only on the literal reply `UNATTENDED` (optionally `until 09:00` or `for 3 milestones`). Then at each gate the guide runs its own verify steps, captures evidence, and writes `AUTO-ACCEPT` or, on any mismatch or step it could not execute, `AUTO-HOLD`, which stops the run and pings you. Every auto-accepted milestone lands in `.hive/reviews/QUEUE`; when you are back, `/hivemind-review` walks you through them with the evidence and your retroactive `CHANGES` become tickets. Unattended never merges into `main`, approves a dependency, installs a skill, or edits `CONVENTIONS.md`, and it stops on its own at five unreviewed milestones. See `references/review.md`.
 
 ## Commit rules
 
@@ -111,7 +124,7 @@ Restart the terminal afterwards.
 
 ### Manual install (any platform)
 
-1. Copy `skills/hivemind/` to `~/.claude/skills/hivemind/` (all repos) or `<repo>/.claude/skills/hivemind/` (one repo).
+1. Copy `skills/hivemind/` and `skills/hivemind-review/` to `~/.claude/skills/` (all repos) or `<repo>/.claude/skills/` (one repo).
 2. Copy `agents/*.md` to `~/.claude/agents/` (or `<repo>/.claude/agents/`).
 3. Copy `teams/` into your repo and run `bash teams/link-skills.sh --install` (or `.\teams\link-skills.ps1 -Install`).
 4. Merge into `~/.claude/settings.json`:
@@ -136,13 +149,15 @@ skills/hivemind/
   references/roles.md      worker / verifier / guide / scout prompts, lead pre-dispatch check
   references/stack.md      who loads which tool, context budget, worktree lifecycle
   references/commits.md    commit message rules
+skills/hivemind-review/
+  SKILL.md                 the human's review session; writes the verdict the lead waits on
 agents/                    thin subagent definitions; each reads its PROFILE.md first
   hive-frontend-worker.md    hive-frontend-verifier.md
   hive-backend-worker.md     hive-backend-verifier.md
   hive-devops-worker.md
   hive-security-verifier.md  second verifier on sensitive tickets
   hive-qa-verifier.md        once per wave on the integration branch
-  hive-guide.md              human review brief per milestone, answers questions
+  hive-guide.md              review brief + evidence per milestone; self-verifies when unattended
   hive-scout.md              picks each profile's skills from skills.sh
 teams/                     copied into your repo by install.sh --project
   link-skills.sh / .ps1    links (or installs) each profile's skills
@@ -154,7 +169,7 @@ install.ps1      Windows installer
 
 ## Uninstall
 
-Delete `~/.claude/skills/hivemind/`, `~/.claude/agents/hive-*.md`, and `teams/` in any repo. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
+Delete `~/.claude/skills/hivemind/`, `~/.claude/skills/hivemind-review/`, `~/.claude/agents/hive-*.md`, and `teams/` plus `.hive/` in any repo. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
 
 ## License
 
