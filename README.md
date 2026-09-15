@@ -16,6 +16,22 @@ The usual multi-agent loop bleeds tokens in three places: the lead sits inside t
 
 Context cost: the description is ~60 tokens per session. The body loads only on `/hivemind` (~760 tokens). `references/roles.md` loads at spawn time, `references/stack.md` on first run in a repo, `references/commits.md` when an agent commits. A full run costs the lead under ~1,500 tokens of skill text.
 
+## Works from any project state
+
+Step 0 of every run reads `references/bootstrap.md` and detects where the repo is:
+
+- **Blank** — grills the idea, runs `/setup-matt-pocock-skills`, writes `CONTEXT.md`, and ships a single scaffold ticket (manifest, typecheck, lint, test runner, smoke test) before any feature wave.
+- **Mid-project** — runs every gate on `main`; red gates and dead code become a stabilise ticket that runs alone first. Never dispatches features onto a red baseline.
+- **Ready** — confirms gates, `CONTEXT.md`, `AGENTS.md ## Learned` in one line and goes.
+
+## Teams
+
+A team is a profile, not an extra agent: a subagent definition in `agents/` that fixes which skills preload, which gates count as green, and what its verifier checks. The lead tags each ticket `frontend|backend|devops`, spawns `hive-<profile>-worker`, and takes the verdict from `hive-<profile>-verifier`. Security and QA are verifiers only: security runs as a second verifier on tickets touching auth, input, secrets, or I/O; QA runs once per wave on the integration branch.
+
+The lead never loads a profile's skills. Verifiers carry `memory: project`, so recurring findings persist in `.claude/agent-memory/` without touching the lead. Add a profile by copying two files in `agents/`; see `references/teams.md`.
+
+Each agent's `skills:` list names skills from [skills.sh](https://skills.sh). Install what you're missing with `npx skills add <owner/repo>`; an absent skill is skipped, not fatal.
+
 ## Commit rules
 
 Every agent commits with terse, professional [Conventional Commits](https://www.conventionalcommits.org/). **No AI attribution, no `Co-Authored-By`, ever.** See [`skills/hivemind/references/commits.md`](skills/hivemind/references/commits.md). The installer sets `attribution` in `~/.claude/settings.json` so Claude Code stops offering the trailer.
@@ -74,36 +90,40 @@ Restart the terminal afterwards.
 ### Manual install (any platform)
 
 1. Copy `skills/hivemind/` to `~/.claude/skills/hivemind/` (all repos) or `<repo>/.claude/skills/hivemind/` (one repo).
-2. Merge into `~/.claude/settings.json`:
+2. Copy `agents/*.md` to `~/.claude/agents/` (or `<repo>/.claude/agents/`).
+3. Merge into `~/.claude/settings.json`:
    ```json
    { "attribution": { "commit": "", "pr": "", "sessionUrl": false } }
    ```
-3. Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in your environment.
-
-## Per-repo setup
-
-1. Run `/setup-matt-pocock-skills` once. hivemind refuses to start without it.
-2. Add an empty `## Learned` heading to `AGENTS.md` (or `CLAUDE.md`). That heading is the team's only shared memory.
+4. Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in your environment.
 
 ## First run
 
-Pick a small, real ticket with 2–3 independent pieces. Type `/hivemind` and hand it the ticket. It walks you through grill → spec → tickets → contracts → dispatch. Note tokens per merged ticket; that is your baseline for tuning the `routine|standard|hard` routing.
+Type `/hivemind` in any repo, blank or not, and hand it the ticket or the idea. Bootstrap handles `/setup-matt-pocock-skills`, `CONTEXT.md`, and `AGENTS.md ## Learned`, then it walks you through grill → spec → tickets → contracts → dispatch. Start with a small, real ticket with 2–3 independent pieces. Note tokens per merged ticket; that is your baseline for tuning the `routine|standard|hard` routing.
 
 ## Layout
 
 ```
 skills/hivemind/
   SKILL.md                 entry point, loaded on /hivemind
+  references/bootstrap.md  blank / mid-project / ready detection and setup
+  references/teams.md      profiles, routing, how to add one
   references/roles.md      worker / verifier prompts, lead pre-dispatch check
   references/stack.md      who loads which tool, context budget, worktree lifecycle
   references/commits.md    commit message rules
+agents/
+  hive-frontend-worker.md    hive-frontend-verifier.md
+  hive-backend-worker.md     hive-backend-verifier.md
+  hive-devops-worker.md
+  hive-security-verifier.md  second verifier on sensitive tickets
+  hive-qa-verifier.md        once per wave on the integration branch
 install.sh       Linux / macOS installer
 install.ps1      Windows installer
 ```
 
 ## Uninstall
 
-Delete `~/.claude/skills/hivemind/`. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
+Delete `~/.claude/skills/hivemind/` and `~/.claude/agents/hive-*.md`. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
 
 ## License
 

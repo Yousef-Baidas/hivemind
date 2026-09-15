@@ -7,15 +7,21 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$HERE/skills/hivemind"
 
 if [[ "${1:-}" == "--project" ]]; then
-  DEST="$PWD/.claude/skills/hivemind"
+  BASE="$PWD/.claude"
 else
-  DEST="$HOME/.claude/skills/hivemind"
+  BASE="$HOME/.claude"
 fi
+DEST="$BASE/skills/hivemind"
+AGENTS="$BASE/agents"
 
-mkdir -p "$(dirname "$DEST")"
+mkdir -p "$(dirname "$DEST")" "$AGENTS"
 rm -rf "$DEST"
 cp -R "$SRC" "$DEST"
 echo "skill  -> $DEST"
+
+rm -f "$AGENTS"/hive-*.md
+cp "$HERE"/agents/hive-*.md "$AGENTS"/
+echo "agents -> $AGENTS/hive-*.md"
 
 # Turn off AI attribution in commits and PRs.
 SETTINGS="$HOME/.claude/settings.json"

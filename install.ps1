@@ -7,15 +7,21 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Src  = Join-Path $Here "skills\hivemind"
 
 if ($Project) {
-    $Dest = Join-Path (Get-Location) ".claude\skills\hivemind"
+    $Base = Join-Path (Get-Location) ".claude"
 } else {
-    $Dest = Join-Path $HOME ".claude\skills\hivemind"
+    $Base = Join-Path $HOME ".claude"
 }
+$Dest   = Join-Path $Base "skills\hivemind"
+$Agents = Join-Path $Base "agents"
 
-New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Dest) | Out-Null
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Dest), $Agents | Out-Null
 if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
 Copy-Item -Recurse $Src $Dest
 Write-Host "skill  -> $Dest"
+
+Get-ChildItem -Path $Agents -Filter "hive-*.md" -ErrorAction SilentlyContinue | Remove-Item -Force
+Copy-Item (Join-Path $Here "agents\hive-*.md") $Agents
+Write-Host "agents -> $Agents\hive-*.md"
 
 # Turn off AI attribution in commits and PRs.
 $Settings = Join-Path $HOME ".claude\settings.json"
