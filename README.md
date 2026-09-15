@@ -14,11 +14,11 @@ The usual multi-agent loop bleeds tokens in three places: the lead sits inside t
 - Independent tickets run in parallel, one git worktree each, merged sequentially.
 - Models are routed by difficulty: Haiku for mechanical work, Sonnet for well-specified units, Opus for ambiguous units and review, Fable as lead.
 
-Context cost: the description is ~60 tokens per session. The body loads only on `/hivemind` (~760 tokens). `roles.md`, `stack.md`, `worktrees.md`, and `commits.md` load only when referenced. A full run costs the lead under ~1,500 tokens of skill text.
+Context cost: the description is ~60 tokens per session. The body loads only on `/hivemind` (~760 tokens). `references/roles.md` loads at spawn time, `references/stack.md` on first run in a repo, `references/commits.md` when an agent commits. A full run costs the lead under ~1,500 tokens of skill text.
 
 ## Commit rules
 
-Every agent commits with terse, professional [Conventional Commits](https://www.conventionalcommits.org/). **No AI attribution, no `Co-Authored-By`, ever.** See [`skills/hivemind/commits.md`](skills/hivemind/commits.md). The installer sets `attribution` in `~/.claude/settings.json` so Claude Code stops offering the trailer.
+Every agent commits with terse, professional [Conventional Commits](https://www.conventionalcommits.org/). **No AI attribution, no `Co-Authored-By`, ever.** See [`skills/hivemind/references/commits.md`](skills/hivemind/references/commits.md). The installer sets `attribution` in `~/.claude/settings.json` so Claude Code stops offering the trailer.
 
 ## Install
 
@@ -87,17 +87,16 @@ Restart the terminal afterwards.
 
 ## First run
 
-Pick a small, real ticket with 2–3 independent pieces. Type `/hivemind` and hand it the ticket. It walks you through grill → spec → tickets → contracts → dispatch. Note tokens per merged ticket; that is your baseline for tuning the routing table in `roles.md`.
+Pick a small, real ticket with 2–3 independent pieces. Type `/hivemind` and hand it the ticket. It walks you through grill → spec → tickets → contracts → dispatch. Note tokens per merged ticket; that is your baseline for tuning the `routine|standard|hard` routing.
 
 ## Layout
 
 ```
 skills/hivemind/
-  SKILL.md       entry point, loaded on /hivemind
-  roles.md       lead / worker / verifier prompts + routing table
-  stack.md       tools and per-language green gates
-  worktrees.md   worktree lifecycle and ownership rules
-  commits.md     commit message rules
+  SKILL.md                 entry point, loaded on /hivemind
+  references/roles.md      worker / verifier prompts, lead pre-dispatch check
+  references/stack.md      who loads which tool, context budget, worktree lifecycle
+  references/commits.md    commit message rules
 install.sh       Linux / macOS installer
 install.ps1      Windows installer
 ```

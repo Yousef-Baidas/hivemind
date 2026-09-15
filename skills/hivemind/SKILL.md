@@ -1,36 +1,26 @@
 ---
 name: hivemind
-description: "Run a ticket through a lead that only plans, parallel workers in git worktrees, and one verifier. Use for /hivemind or when a ticket splits into 2+ independent units."
+description: Ship a spec, PRD, or ticket set as a team of coding agents. Fable plans and arbitrates, Haiku/Sonnet/Opus workers build in isolated worktrees, one Opus verifier gates merges. Use whenever the user says hivemind, orchestrate, dispatch, swarm, or hands over work bigger than one agent should do alone.
 disable-model-invocation: true
 ---
 
-Run one ticket through lead → workers → verifier. The lead plans, writes contracts, and arbitrates. It never patches code and never reads worker diffs.
+You are the lead. Four rules; break one and the bill explodes:
 
-## Preconditions
+1. Lead plans, never patches. No feature code, no fix loops.
+2. Verification lives in the worker. Types, lint, tests, dead-code green before it reports.
+3. Agents talk to artifacts (task list, tickets, contracts, test reports), never to each other.
+4. Every ticket is a tracer bullet: one paragraph, one failing test, one owning module. Bigger → split.
 
-- `/setup-matt-pocock-skills` has run in this repo. Refuse to start otherwise.
-- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set.
-- First run in a repo: read `stack.md`, record which gates apply under `## Learned` in `AGENTS.md`.
+Read `references/roles.md` only when spawning. Read `references/stack.md` on first run in a repo. Every agent that commits follows `references/commits.md`: Conventional Commits, terse, no AI attribution trailer, ever.
 
 ## Flow
 
-1. **Grill.** `/grilling` until the ticket has no open questions. Use `/grill-with-docs` when an external API is involved.
-2. **Spec and tickets.** `/to-spec`, then `/to-tickets`. A ticket is one paragraph plus one failing test. Anything bigger gets split.
-3. **Contracts.** Write interfaces before any code: types, signatures, test stubs. Assign file ownership per ticket; two tickets never touch the same module. Run graphify once here, at planning, and hand each worker only its slice.
-4. **Dispatch.** Read `roles.md`. One worker per ticket, each in its own worktree (`worktrees.md`). Route by difficulty: Haiku for lint fixes, formatting, test runs, summaries; Sonnet for well-specified units; Opus for ambiguous units and review. Fable is the lead only.
-5. **Workers loop to green** on their own: typecheck, lint, tests, dead-code gate. Cap at 2 retries, then send only the diff plus failing output to the verifier. The lead never re-dispatches.
-6. **Verify.** The verifier gets contract, diff, and test report in a fresh context. One pass. Findings go straight back to the worker.
-7. **Merge sequentially** once green. `/resolving-merge-conflicts` on conflict. At close, the lead runs the repo health gate from `stack.md`.
-8. **Learn.** Append gotchas to `## Learned` in `AGENTS.md`. `/handoff` if the lead's context passes ~120k.
-
-## Communication
-
-Agents do not chat. They share three artifacts: the Agent Teams task list, the contracts, and test reports.
-
-## Commits
-
-Read `commits.md`. Conventional Commits, terse, professional. No AI attribution trailer, no `Co-Authored-By`, ever.
-
-## Budget
-
-The lead reads plans, the task list, and reports. It does not read code. Route all tool output through rtk or context-mode. Measure cost per merged ticket, not tokens per turn.
+0. **Precondition**: `/setup-matt-pocock-skills` has been run. If not, run it and stop.
+1. **Orient**: read `AGENTS.md`, `CONTEXT.md`, relevant ADRs. Unfamiliar repo → `graphify` once, keep the summary, never pass it to workers. Bigger than one session → `/wayfinder`. Otherwise `/grill-with-docs` unless already grilled.
+2. **Tickets**: `/to-spec`, then `/to-tickets`. Then enforce: one file owner per ticket, hotspot files (routes, registries, config, barrels) in a ticket that runs first, difficulty tag `routine|standard|hard`.
+3. **Contracts**: per ticket, commit the exported signatures and a red test stub. Use `/codebase-design` vocabulary. Can't write the contract → `/grilling` until you can.
+4. **Dispatch**: Agent Teams, shared task list, one worktree per ticket. Route `routine`→Haiku, `standard`→Sonnet, `hard`→Opus. Worker gets ticket + contract + owned paths only. Worker runs `/implement`; retry cap 2. Then you watch the task list and nothing else.
+5. **Escalate** one rung, never restart: (a) same worker, failing output pasted back, mechanical failures only; (b) diff + red output to the next model up, not the ticket; (c) two Opus fails → the contract is wrong, back to step 3 as a fresh task.
+6. **Verify**: one Opus verifier, fresh context, gets ticket + contract + diff + test report. Runs `/code-review`, blast radius, dead-code. Verdict `MERGE | BACK-TO-WORKER (numbered) | CONTRACT-WRONG`. Back-to-worker goes direct, one round, then it's contract-wrong.
+7. **Merge** sequentially in dependency order into `hive/<run>`, full suite after each. Conflicts → `/resolving-merge-conflicts`.
+8. **Close**: full suite + `fallow health` (JS/TS) or `vulture` (Python) on the integration branch. Append repeated corrections to `AGENTS.md` under "Learned". Session ending with open work → `/handoff`. Report cost per merged ticket.
