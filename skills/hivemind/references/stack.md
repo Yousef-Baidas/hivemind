@@ -12,11 +12,16 @@
 | fallow (JS/TS) | `health` at close | `dead-code` on owned paths | `dupes` on diff |
 | vulture / vulture-rs (Python) | close | `--min-confidence 80` owned paths | diff |
 | ripgrep | yes | yes | yes |
+| anti-slop oxlint rules (JS/TS) | – | via lint gate | via CI |
+| thermo-nuclear review | – | – | QA, per milestone |
+| improve-codebase-architecture | – | – | QA, at close |
+
+caveman owns prose, ponytail owns code size, rtk + context-mode own tool output. Chisle covers all three in one ruleset; loaded beside them it restates caveman and ponytail and the two prose styles fight, so it is not part of the stack. Its one uncovered axis, eliding oversized non-Bash tool output, is optional: install it with `CHISLE_DEFAULT_MODE=off` so only the compress hook runs, and never let it elide `Agent` output, which is where verdicts arrive.
 
 Never two graph tools on one role. Workers get no repo tour; if one asks for context, fix the ticket. Missing tool → note once in the task list, continue.
 
 ## Context budget (200k lead)
-Lead never reads worker code or diffs; the verifier does. Lead holds: skill, issue numbers, contracts, task list, one-line verdicts. Never a raw `gh issue view`; always `--json … -q`. If the lead passes ~120k, `/handoff` and restart the lead; workers and verifier are unaffected.
+Lead never reads worker code or diffs; the verifier does. Lead never writes code either; a fix is a decision dispatched to Sonnet or Opus. Lead holds: skill, issue numbers, contracts, task list, one-line verdicts. Never a raw `gh issue view`; always `--json … -q`. If the lead passes ~120k, `/handoff` and restart the lead; workers and verifier are unaffected.
 
 ## Worktrees
 ```

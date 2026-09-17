@@ -55,9 +55,22 @@ if ($Project) {
         New-Item -ItemType Directory -Force -Path "teams\$p" | Out-Null
         if (-not (Test-Path "teams\$p\PROFILE.md")) { Copy-Item (Join-Path $dir.FullName "PROFILE.md") "teams\$p\PROFILE.md" }
         if (-not (Test-Path "teams\$p\skills.txt")) { Copy-Item (Join-Path $dir.FullName "skills.txt") "teams\$p\skills.txt" }
+        $req = Join-Path $dir.FullName "required.txt"
+        if (Test-Path $req) { Copy-Item -Force $req "teams\$p\required.txt" }
     }
     Write-Host "teams    -> $(Get-Location)\teams (PROFILE.md, skills.txt, link-skills.*, templates\)"
     & ".\teams\link-skills.ps1" -Install:$Install -Confine:$Confine
+
+    # lead autostart + guard: machine-local, never tracked
+    if (Get-Command node -ErrorAction SilentlyContinue) {
+        node "teams\templates\hooks\install-lead-hooks.js"
+        if ((Test-Path ".git" -PathType Container) -and -not (Select-String -Path ".git\info\exclude" -SimpleMatch ".claude/settings.local.json" -Quiet -ErrorAction SilentlyContinue)) {
+            New-Item -ItemType Directory -Force -Path ".git\info" | Out-Null
+            Add-Content -Path ".git\info\exclude" -Value ".claude/settings.local.json"
+        }
+    } else {
+        Write-Host "node not found; lead autostart + guard not installed"
+    }
 }
 
 if ($env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS -ne "1") {

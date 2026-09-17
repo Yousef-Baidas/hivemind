@@ -3,7 +3,9 @@
 #
 #   ./install.sh                 skill + agents into ~/.claude (every repo)
 #   ./install.sh --project       same into ./.claude of the current repo, plus
-#                                ./teams/<profile>/ with skills linked per skills.txt
+#                                ./teams/<profile>/ with skills linked per skills.txt,
+#                                and the lead's autostart + guard hooks in
+#                                ./.claude/settings.local.json (HIVEMIND=0 claude skips them)
 #   ./install.sh --project --install   also `npx skills add` any skill not on this machine
 #   ./install.sh --project --confine   also remove the global ~/.claude/skills/<name>
 #                                      symlink for every linked skill, so the lead never sees it
@@ -62,9 +64,21 @@ if (( PROJECT )); then
     mkdir -p "teams/$p"
     [[ -f "teams/$p/PROFILE.md" ]] || cp "$dir/PROFILE.md" "teams/$p/PROFILE.md"
     [[ -f "teams/$p/skills.txt" ]] || cp "$dir/skills.txt" "teams/$p/skills.txt"
+    # required.txt is the pipeline's, not the scout's or the repo's: always refreshed
+    [[ -f "$dir/required.txt" ]] && cp "$dir/required.txt" "teams/$p/required.txt"
   done
   echo "teams    -> $PWD/teams (PROFILE.md, skills.txt, link-skills.*, templates/)"
   bash teams/link-skills.sh "${LINKFLAGS[@]}"
+
+  # lead autostart + guard: machine-local, never tracked, so worker worktrees do not inherit them
+  if command -v node >/dev/null 2>&1; then
+    node teams/templates/hooks/install-lead-hooks.js
+    if [[ -d .git ]] && ! grep -qxF '.claude/settings.local.json' .git/info/exclude 2>/dev/null; then
+      mkdir -p .git/info && echo '.claude/settings.local.json' >> .git/info/exclude
+    fi
+  else
+    echo "node not found; lead autostart + guard not installed"
+  fi
 fi
 
 if [[ "${CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-}" != "1" ]]; then

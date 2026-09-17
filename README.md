@@ -8,13 +8,23 @@ Built on top of the [mattpocock-skills](https://github.com/mattpocock/skills) wo
 
 The usual multi-agent loop bleeds tokens in three places: the lead sits inside the fix loop, verification happens after handoff instead of inside the worker, and agents chat. hivemind fixes all three:
 
-- The lead decomposes, writes contracts, and arbitrates. It never patches and never reads diffs.
+- The lead decides, writes prompts, and dispatches. It writes no code, not even the contract stubs, and never reads diffs. A hook refuses its edits.
 - Workers run typecheck, lint, tests, and a dead-code gate themselves, loop to green, and cap at 2 retries.
 - Escalation sends only the diff plus failing output to a fresh-context verifier. One pass.
 - Independent tickets run in parallel, one git worktree each, merged sequentially.
-- Models are routed by difficulty: Haiku for mechanical work, Sonnet for well-specified units, Opus for ambiguous units and review, Fable as lead.
+- Only Sonnet and Opus write or review code: Sonnet for `standard` tickets, Opus for `hard` tickets and every verdict. Fable leads by decision alone. Haiku touches no code; a hook refuses the spawn.
+- The pipeline is fixed. A step is skipped or added only when you say so or a `/research` finding does.
 
 Context cost: the description is ~60 tokens per session. The body loads only on `/hivemind` (~1,000 tokens). `references/roles.md` loads at spawn time, `references/stack.md` on first run in a repo, `references/commits.md` when an agent commits. Every other reference loads only at the step that names it, so the lead pays for what the run actually uses.
+
+## Starts itself
+
+`install.sh --project` registers two hooks in the repo's `.claude/settings.local.json` (machine-local, untracked):
+
+- **Autostart.** Every session opened in the repo begins as the lead, skill loaded, no `/hivemind` typed. The hook also prints a `hive-state` line from local files (docs present, skills scouted and linked, gates installed, open `hive/*` branches), so the lead skips what is already set up and spends its first calls on what can never be skipped: tracker preflight, pending human reviews, resuming an open run at the right step, and the baseline on `main`.
+- **Lead guard.** On the main thread, edits inside the repo are refused except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, and ADRs; an Agent call on Haiku, on the lead's own tier, or with no model on a non-`hive-*` agent is refused.
+
+`HIVEMIND=0 claude` opens a plain session with neither, for the review session or for working by hand.
 
 ## Works from any project state
 
@@ -35,6 +45,15 @@ The lead tags each ticket `frontend|backend|devops`, spawns `hive-<profile>-work
 ### Skills are picked for your repo, not mine
 
 The shipped `skills.txt` files are only a starting set. At bootstrap the lead spawns `hive-scout`, which reads your manifests, queries skills.sh for each stack term, ranks by installs, prefers the framework's own org or a large curated set, caps at eight per profile, and rewrites the lists. It prints what it picked and why, then stops. You approve and run the link script. Nothing third-party enters a worker without that yes.
+
+### Required skills
+
+Two skills are the pipeline's, not the scout's; they live in `teams/<profile>/required.txt` and never count against the cap.
+
+- [anti-slop](https://github.com/dmmulroy/anti-slop) — on JS/TS the scaffold or stabilise ticket vendors its oxlint rules into the lint gate. After that slop fails lint in the worker, in lefthook, and in CI, at zero agent tokens.
+- [thermo-nuclear-code-quality-review](https://github.com/cursor/plugins/tree/main/cursor-team-kit/skills/thermo-nuclear-code-quality-review) — the QA pass applies it on Opus to every milestone diff; its blockers are tickets and the human gate stays shut until they merge. Per milestone, not per ticket: on a forty-line diff it demands rewrites nobody asked for.
+
+At close the same pass runs the scan phase of mattpocock `improve-codebase-architecture` and files up to five deepening candidates on a `hive-debt` issue for you to pick from. On a blank TypeScript repo the scaffold worker uses [create-better-t-stack](https://github.com/AmanVarshney01/create-better-t-stack) when the grilled stack is one it offers; the stack picks the tool, never the reverse.
 
 ## Your conventions, not the model's
 
@@ -96,6 +115,7 @@ Every agent commits with terse, professional [Conventional Commits](https://www.
    - [caveman](https://github.com/JuliusBrussee/caveman) — terse agent output
    - [ponytail](https://github.com/DietrichGebert/ponytail) — minimal code
    - [rtk](https://github.com/rtk-ai/rtk) — compressed shell output
+   - [Chisle](https://github.com/JayPokale/Chisle) is not a companion: it restates caveman and ponytail in one ruleset and the prose styles fight when stacked. Optional, compress hook only (`CHISLE_DEFAULT_MODE=off`); see `references/stack.md`
    - [context-mode](https://github.com/mksglu/context-mode) — sandboxed analysis
    - Claude Code LSP plugin: `/plugin install <language>-lsp@claude-plugins-official`
    - [graphify](https://github.com/safishamsi/graphify) — planning-stage orientation only
@@ -109,7 +129,7 @@ git clone https://github.com/Yousef-Baidas/hivemind.git
 cd hivemind
 ./install.sh                       # skill + agents for every repo
 cd /path/to/your/repo
-/path/to/hivemind/install.sh --project                     # teams/ with linked skills
+/path/to/hivemind/install.sh --project                     # teams/ with linked skills, lead autostart + guard
 /path/to/hivemind/install.sh --project --install --confine # fetch missing, hide from lead
 ```
 
@@ -129,7 +149,7 @@ git clone https://github.com/Yousef-Baidas/hivemind.git
 cd hivemind
 .\install.ps1                      # skill + agents for every repo
 cd C:\path\to\your\repo
-C:\path\to\hivemind\install.ps1 -Project                    # teams\ with linked skills
+C:\path\to\hivemind\install.ps1 -Project                    # teams\ with linked skills, lead autostart + guard
 C:\path\to\hivemind\install.ps1 -Project -Install -Confine  # fetch missing, hide from lead
 ```
 
@@ -147,7 +167,7 @@ Restart the terminal afterwards.
 
 1. Copy `skills/hivemind/` and `skills/hivemind-review/` to `~/.claude/skills/` (all repos) or `<repo>/.claude/skills/` (one repo).
 2. Copy `agents/*.md` to `~/.claude/agents/` (or `<repo>/.claude/agents/`).
-3. Copy `teams/` into your repo and run `bash teams/link-skills.sh --install` (or `.\teams\link-skills.ps1 -Install`).
+3. Copy `teams/` into your repo and run `bash teams/link-skills.sh --install` (or `.\teams\link-skills.ps1 -Install`). Copy `templates/` to `teams/templates/` and run `node teams/templates/hooks/install-lead-hooks.js` from the repo root.
 4. Merge into `~/.claude/settings.json`:
    ```json
    { "attribution": { "commit": "", "pr": "", "sessionUrl": false } }
@@ -156,7 +176,7 @@ Restart the terminal afterwards.
 
 ## First run
 
-Type `/hivemind` in any repo, blank or not, and hand it the ticket or the idea. Bootstrap handles `/setup-matt-pocock-skills`, `CONTEXT.md`, the conventions interview, the skills scout, and `AGENTS.md ## Learned`, then it walks you through grill → spec → tickets → contracts → dispatch → human review. Start with a small, real ticket with 2–3 independent pieces. Note tokens per merged ticket; that is your baseline for tuning the `routine|standard|hard` routing.
+Open `claude` in a repo where you ran `install.sh --project` and hand it the ticket or the idea; the session is already the lead. Anywhere else, type `/hivemind`. Bootstrap handles `/setup-matt-pocock-skills`, `CONTEXT.md`, the conventions interview, the skills scout, and `AGENTS.md ## Learned`, then it walks you through grill → spec → tickets → contracts → dispatch → human review. Start with a small, real ticket with 2–3 independent pieces. Note tokens per merged ticket; that is your baseline for tuning the `standard|hard` routing.
 
 ## Layout
 
@@ -186,15 +206,17 @@ teams/                     copied into your repo by install.sh --project
   link-skills.sh / .ps1    links (or installs) each profile's skills
   <profile>/PROFILE.md     rules, green additions, verifier checklist
   <profile>/skills.txt     <owner/repo> <skill> lines; links land in .claude/skills/ (git-ignored)
+  <profile>/required.txt   pipeline-required skills, same format; the scout never edits it
   skills-lock.json         content hash per linked skill, written by link-skills
-  templates/               hive-gates.yml, lefthook.yml, commit-msg.js, hive-owned-paths.js
+  templates/               hive-gates.yml, lefthook.yml, commit-msg.js, hive-owned-paths.js,
+                           hive-autostart.js, hive-lead-guard.js, install-lead-hooks.js
 install.sh       Linux / macOS installer
 install.ps1      Windows installer
 ```
 
 ## Uninstall
 
-Delete `~/.claude/skills/hivemind/`, `~/.claude/skills/hivemind-review/`, `~/.claude/agents/hive-*.md`, and `teams/` in any repo; `.github/workflows/hive-gates.yml`, `lefthook.yml`, and `.claude/hooks/` are yours to keep or drop. Open `hive-*` issues and labels stay on GitHub for you to close. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
+Delete `~/.claude/skills/hivemind/`, `~/.claude/skills/hivemind-review/`, `~/.claude/agents/hive-*.md`, `teams/` in any repo, and the two `hive-` entries in its `.claude/settings.local.json`; `.github/workflows/hive-gates.yml`, `lefthook.yml`, and `.claude/hooks/` are yours to keep or drop. Open `hive-*` issues and labels stay on GitHub for you to close. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
 
 ## License
 

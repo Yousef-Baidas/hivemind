@@ -62,3 +62,20 @@ curl -s https://api.osv.dev/v1/query -d '{"package":{"name":"<name>","ecosystem"
 ```
 
 Result goes into the issue comment with the request. The human still decides; unattended mode parks it.
+
+## 9. anti-slop lint rules (JS/TS)
+
+Required, `teams/devops/required.txt`. The scaffold or stabilise worker reads `teams/devops/PROFILE.md`, runs the `install-anti-slop` skill, and the vendored oxlint plugin (`tools/oxlint/anti-slop/`) joins the lint gate: lefthook pre-commit, CI `gates`, and every worker's green. After that it costs no agent a token; slop fails lint like a type error fails the build. A rule that fights `CONVENTIONS.md` is disabled in `oxlint.config.ts` with the convention quoted; the human's file wins. No JS/TS in the repo → write `anti-slop: n/a` under `## Learned` once. Updating the rules is a devops ticket, never a side effect.
+
+## 10. Deep review per milestone, architecture scan at close
+
+Required, `teams/qa/required.txt`. Per-ticket verifiers check a diff against its contract; nobody at that level sees what five merged tickets did to a module. So at every milestone the QA pass (Opus) applies `thermo-nuclear-code-quality-review` to the milestone diff; its blockers are `WAVE-RED` tickets and the human gate stays shut until they merge. Per milestone, not per ticket: on a forty-line diff it demands rewrites the ticket never asked for and doubles the verifier bill. At close the same agent runs the scan phase of mattpocock `improve-codebase-architecture` and files at most five candidates on the `hive-debt` issue. Both are read from their `SKILL.md`; both are `disable-model-invocation`. Non-blocker findings go to `hive-debt`, where the human decides what becomes a run.
+
+## 11. The lead's guard and autostart
+
+`install.sh --project` copies `hive-autostart.js` and `hive-lead-guard.js` to `.claude/hooks/` and registers them in `.claude/settings.local.json` (untracked, so a worker's worktree never inherits them; both also exit silently in a linked worktree or inside a subagent).
+
+- Autostart (`SessionStart`): prints the skill body and a `hive-state` line built from local files, so every session in the repo opens as the lead at "Session start" with no command typed. A resumed session gets the state line only.
+- Guard (`PreToolUse`): on the main thread, refuses `Edit`/`Write` inside the repo except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, `docs/adr/*.md`; refuses an `Agent` call whose model is Haiku or the lead's tier, or a non-`hive-*` agent with no model (it would inherit the lead's). `Bash` writes are not caught; rule 1 of the skill covers them.
+
+`HIVEMIND=0 claude` opens a plain session with neither: the review session, or the human working by hand.

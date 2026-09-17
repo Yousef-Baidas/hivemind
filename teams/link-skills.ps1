@@ -26,15 +26,16 @@ function Find-Src([string]$name) {
 $missing = @(); $linked = @()
 foreach ($dir in Get-ChildItem "teams" -Directory) {
     $p = $dir.Name
-    $list = Join-Path $dir.FullName "skills.txt"
-    if (-not (Test-Path $list)) { continue }
+    # required.txt: the pipeline's mandatory skills, same format; hive-scout never rewrites it
+    $lists = @("required.txt", "skills.txt") | ForEach-Object { Join-Path $dir.FullName $_ } | Where-Object { Test-Path $_ }
+    if (-not $lists) { continue }
     $skillsDir = Join-Path $dir.FullName ".claude\skills"
     New-Item -ItemType Directory -Force -Path $skillsDir | Out-Null
     $n = 0
-    foreach ($line in Get-Content $list) {
+    foreach ($line in Get-Content $lists) {
         $parts = $line.Trim() -split '\s+'
         if ($parts.Count -eq 0 -or $parts[0] -eq "" -or $parts[0].StartsWith("#")) { continue }
-        if ($parts.Count -lt 2) { Write-Warning "teams/$p/skills.txt: line needs '<owner/repo> <skill>': $line"; continue }
+        if ($parts.Count -lt 2) { Write-Warning "teams/${p}: line needs '<owner/repo> <skill>': $line"; continue }
         $source = $parts[0]; $name = $parts[1]
         $src = Find-Src $name
         if (-not $src -and $Install) {

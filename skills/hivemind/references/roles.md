@@ -15,6 +15,17 @@ Done → comment `DONE #<n> / files / tests passed / one-line note` on the issue
 CONTEXT.md vocabulary. Caveman full. Ponytail full.
 ```
 
+## Contracts worker (step 3, one per profile in the wave, sequential)
+```
+Run <run>, branch hive/<run>, tickets #<n>, #<n>, … Spawned as hive-<profile>-worker; no worktree, no PR.
+Per ticket: `gh issue view <n> --json body -q .body` holds the exported signatures and the red test (name, input, expected assertion). Commit exactly those: signature stubs that compile and throw/`todo!()`/`raise NotImplementedError`, and the red test. No behaviour, no helpers, no extra exports.
+Each test must fail on its assertion or the not-implemented throw, never on an import, type, or syntax error. Typecheck and lint green.
+A signature that cannot be written as given → `gh issue comment <n> --body "CONTRACT-UNCLEAR: <what>"`, skip that ticket, continue.
+One commit per ticket, `test(<scope>): contract for #<n>`, per references/commits.md. Push hive/<run>.
+Done → per ticket one line to the task list: `CONTRACT #<n> <stub file:line> <test file::name> red-on-assertion`.
+CONTEXT.md vocabulary. CONVENTIONS.md applies. Caveman full. Ponytail full.
+```
+
 ## Verifier
 ```
 Ticket #<n>, PR #<pr>. No repo tour. Inputs: issue body, contract, `gh pr diff <pr>`, `gh pr checks <pr> --json name,state`, worker's DONE comment. CI red → BACK-TO-WORKER with the failing check named; no checks listed → run the suite yourself. `gh pr diff <pr> --name-only` outside the ticket's owned paths → BACK-TO-WORKER.
@@ -32,10 +43,16 @@ Run <run>, milestone <name>, mode <attended|unattended>. Tickets: #<n>, ... Diff
 Open the review issue with brief and evidence per your agent instructions, post REVIEW <milestone> <url> to the task, exit.
 ```
 
+## QA (wave | milestone | close)
+```
+Run <run>, branch hive/<run>, mode <wave|milestone|close>. Tickets: #<n>, … Merge-base: <sha>. Gates: <commands>.
+Follow teams/qa/PROFILE.md for that mode. One verdict line to the task list; findings as issue comments or new issues per the profile. Fix nothing.
+```
+
 ## Scout (bootstrap)
 ```
 Stack from manifests (or CONTEXT.md if blank). Rewrite teams/*/skills.txt from skills.sh ranked by installs, ≤8 per profile. Report per profile with installs and why. Do not install.
 ```
 
 ## Lead pre-dispatch check
-Every ticket is a tracker issue with milestone, profile, difficulty. Contract + red test committed per ticket. No shared file owners in this wave. Hotspot tickets merged. Model tag set. CONVENTIONS.md exists. No human review open. `hive/<run>` protected. Each worktree has `.claude/hive-owned`. I wrote no feature code.
+Every ticket is a tracker issue with milestone, profile, difficulty. Contract + red test committed per ticket. No shared file owners in this wave. Hotspot tickets merged. Difficulty is `standard` or `hard` and the Agent call says `sonnet` or `opus`; no Haiku, no inherited model. CONVENTIONS.md exists. No human review open. `hive/<run>` protected. Each worktree has `.claude/hive-owned`. I wrote no code, no test, no config, and resolved no conflict; every fix I decided went out as a ticket or a BACK-TO-WORKER.

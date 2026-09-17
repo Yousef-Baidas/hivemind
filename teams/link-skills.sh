@@ -10,6 +10,8 @@
 #   bash teams/link-skills.sh --relock     accept current hashes into teams/skills-lock.json
 #
 # skills.txt line format:  <owner/repo> <skill-name>
+# required.txt (same format) holds the pipeline's mandatory skills; hive-scout never
+# rewrites it and it does not count against the eight-per-profile cap.
 # teams/skills-lock.json pins each linked skill's content hash (sha256 over its files);
 # a differing hash on this machine prints "drift: <skill>" and keeps the committed hash.
 set -euo pipefail
@@ -36,12 +38,12 @@ find_src() {
 missing=(); linked=()
 for dir in teams/*/; do
   p="$(basename "$dir")"
-  [[ -f "$dir/skills.txt" ]] || continue
+  [[ -f "$dir/skills.txt" || -f "$dir/required.txt" ]] || continue
   mkdir -p "$dir/.claude/skills"
   n=0
   while read -r source name _; do
     [[ -z "${source:-}" || "$source" == \#* ]] && continue
-    [[ -z "${name:-}" ]] && { echo "teams/$p/skills.txt: line needs '<owner/repo> <skill>': $source" >&2; continue; }
+    [[ -z "${name:-}" ]] && { echo "teams/$p: line needs '<owner/repo> <skill>': $source" >&2; continue; }
     if ! src="$(find_src "$name")"; then
       if (( INSTALL )); then
         npx -y skills add "$source" --skill "$name" -g -y -a claude-code >/dev/null 2>&1 || true
@@ -53,7 +55,7 @@ for dir in teams/*/; do
     n=$((n+1))
     linked+=("$name=$source=$src")
     if (( CONFINE )) && [[ -L "$HOME/.claude/skills/$name" ]]; then rm "$HOME/.claude/skills/$name"; fi
-  done < "$dir/skills.txt"
+  done < <(cat "$dir/required.txt" "$dir/skills.txt" 2>/dev/null)
   echo "teams/$p -> $n skills linked"
 done
 

@@ -13,7 +13,7 @@ At step 2, after `/to-tickets`, one tracker milestone per user-visible feature o
 Fires after the last ticket of a milestone merges into `hive/<run>` and QA says `WAVE-GREEN`.
 
 1. Spawn `hive-guide` with run, milestone, ticket numbers, diff range, QA verdict, gate commands, mode. It opens the review issue `Review: <run>/<milestone>` (label `hive-review`, `needs-human`) with the brief and evidence links, exits.
-2. `PushNotification`: `review ready: <milestone> — <issue url>`. Print the url and `claude → /hivemind-review` in a second terminal (or `/remote-control` from the phone).
+2. `PushNotification`: `review ready: <milestone> — <issue url>`. Print the url and `HIVEMIND=0 claude → /hivemind-review` in a second terminal (or `/remote-control` from the phone).
 3. Wait: `Bash run_in_background`, the poll from `tracker.md`, until a verdict comment exists. Dispatch nothing. Idle context costs nothing.
 4. Verdict comment, first line:
    - `ACCEPT` → remove `needs-human`, close review issue and milestone, next milestone. Last one → step 8.
@@ -26,7 +26,7 @@ Any of these produce the verdict comment; the lead does not care which.
 
 | Channel | How |
 |---|---|
-| review session | second terminal, `claude --model sonnet`, `/hivemind-review`. Fresh session with the issue, the diff, and the evidence; chats, runs steps on request, posts the verdict when told. Zero lead tokens. |
+| review session | second terminal, `HIVEMIND=0 claude --model sonnet`, `/hivemind-review` (`HIVEMIND=0` keeps the lead autostart and guard out of it). Fresh session with the issue, the diff, and the evidence; chats, runs steps on request, posts the verdict when told. Zero lead tokens. |
 | phone | `/remote-control` on the review session, or the GitHub app: read the issue, comment `ACCEPT`. |
 | issue only | read the brief on GitHub, comment `ACCEPT` or `CHANGES` + lines. No AI involved. |
 | evidence only | open the linked screenshots, then comment. |

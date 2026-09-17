@@ -18,6 +18,10 @@ The agent definitions in `agents/` (`hive-<profile>-worker`, `hive-<profile>-ver
 
 Skills per profile live in `teams/<profile>/skills.txt`, one `<owner/repo> <skill-name>` per line, resolved from [skills.sh](https://skills.sh). The shipped lists are defaults; `hive-scout` rewrites them for the repo's stack at bootstrap, ranked by installs, and the human approves before `teams/link-skills.sh --install` pulls them in. Keep each list to what the role uses on most tickets, eight at most. Everything else stays global and on-demand.
 
+`teams/<profile>/required.txt`, same format, is the pipeline's: `install-anti-slop` for devops (the scaffold ticket turns it into a lint gate), `thermo-nuclear-code-quality-review` for qa (every milestone). The scout never rewrites it, it does not count against the eight, and `install.sh --project` refreshes it. A missing required skill stops the run.
+
+Models: workers are Sonnet (`standard`) or Opus (`hard`); profile and security verifiers are Opus; QA is Sonnet per wave, Opus per milestone and at close; guide and scout are Sonnet and touch no code. Haiku and the lead's own model never write or review code.
+
 ## Routing
 
 - Tag at `/to-tickets`: `profile: frontend|backend|devops`. A ticket needing two profiles is two tickets with a contract between them.

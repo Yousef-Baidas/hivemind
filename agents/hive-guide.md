@@ -22,7 +22,7 @@ Brief, under 60 lines, plain language, sections in this order:
 3. **Look hardest at** — 3 to 5 places an AI plausibly got wrong: edge cases the tests skip, contract assumptions, anything touching auth, money, deletion, concurrency. `file:line`.
 4. **Conventions** — deviations from `CONVENTIONS.md`, or "none found".
 5. **Evidence** — gate output tail inline in a code block; screenshots and recordings as links.
-6. **Verdict line** — exactly: `Second terminal: claude → /hivemind-review. Or comment ACCEPT / CHANGES here.`
+6. **Verdict line** — exactly: `Second terminal: HIVEMIND=0 claude → /hivemind-review. Or comment ACCEPT / CHANGES here.`
 
 Evidence, both modes: run the gate command in a temp dir, keep the tail. UI in the diff and Playwright MCP or `playwright-cli` available → one screenshot per verify step, named `<step>-<what>.png`, plus a short recording if the flow has more than three clicks; push them to the orphan branch `hive-evidence/<run>` and link the raw URLs. No UI → transcript per step inline, trimmed. Temp files deleted after push.
 
