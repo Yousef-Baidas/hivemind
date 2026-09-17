@@ -26,6 +26,14 @@ Context cost: the description is ~60 tokens per session. The body loads only on 
 
 `HIVEMIND=0 claude` opens a plain session with neither, for the review session or for working by hand.
 
+## Asks before it guesses
+
+Before any spec the lead must be able to state six things without guessing: the user-visible outcome, how you will check it is done, what is out of scope, the modules touched, the constraints, and that no question is open. Any blank and it grills you (`/grill-with-docs`, or `/grilling` on a blank repo), one question at a time. Work bigger than a milestone or a session goes through `/wayfinder` first. Unattended, a work order with a blank is parked, never assumed.
+
+## Survives compaction
+
+Tickets, verdicts, and reviews live in the tracker; the autostart hook re-injects the skill after every auto-compact or `/compact`; and the lead logs every decision that lives nowhere else (grilled answers, an `UNATTENDED` grant, allowed deviations) as one-line comments on a `Run: <run>` issue. After a compaction it rebuilds its position from the tracker and that log, not from the summary.
+
 ## Works from any project state
 
 Step 0 of every run reads `references/bootstrap.md` and detects where the repo is:
@@ -173,6 +181,23 @@ Restart the terminal afterwards.
    { "attribution": { "commit": "", "pr": "", "sessionUrl": false } }
    ```
 5. Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in your environment.
+
+### Updating
+
+```bash
+cd /path/to/hivemind && git pull && ./install.sh          # skill + agents
+cd /path/to/your/repo && /path/to/hivemind/install.sh --project   # hooks, templates, required.txt
+```
+
+`--project` never overwrites your `PROFILE.md` or `skills.txt`; it refreshes the link scripts, templates, `required.txt`, and the two lead hooks. Commit the `teams/` changes.
+
+### Check the install
+
+```bash
+ls ~/.claude/skills/hivemind/SKILL.md ~/.claude/agents/hive-*.md
+grep -c hive- .claude/settings.local.json        # 2, from the repo root
+echo '{"source":"startup"}' | CLAUDE_PROJECT_DIR=$PWD node .claude/hooks/hive-autostart.js | sed -n 4p   # the hive-state line
+```
 
 ## First run
 
