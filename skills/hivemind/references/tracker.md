@@ -12,6 +12,7 @@ Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the secon
 |---|---|
 | preflight | `gh auth status` and `gh repo view --json nameWithOwner -q .nameWithOwner`; either fails → stop, tell the human |
 | labels (once) | `gh label create hive`, `hive-review`, `needs-human`, `profile:frontend|backend|devops`, `difficulty:standard|hard`, `hive-debt` (`--force`, ignore exists) |
+| run log | one per run: `gh issue create --title "Run: <run>" --label hive --body "lead's decision log"`; one comment per decision that lives nowhere else (grilled decisions pre-spec, `UNATTENDED` grant, allowed deviations, parked `NEEDS`, fork point). Read back after a compaction or a new session: `gh issue view <n> --json comments -q '.comments[].body'`. Closed at step 8 |
 | milestone | `gh api repos/{owner}/{repo}/milestones -f title="<run>/<milestone>"` |
 | ticket | `gh issue create --title "<id>: <intent line>" --label hive,profile:<p>,difficulty:<d> --milestone "<run>/<m>" --body-file -` (body: intent, contract signatures as a code block, red test as name + input + expected assertion, owned paths, depends-on) |
 | protect branch (per run) | after `git push -u origin hive/<run>`: `gh api -X PUT "repos/{owner}/{repo}/branches/hive%2F<run>/protection" --input -` with the JSON in `enforcement.md` §1; requires check `gates` green. 403 → `protection: none` in `## Learned`, continue |

@@ -40,6 +40,9 @@ process.stdin.on("end", () => {
       "The human's first message is the work order (or a question about the run). Void only if that message is /hivemind-review, another slash command, or says \"no hivemind\".",
       `References live in ${path.join(skillDir, "references")}/.`,
       state,
+      ev.source === "compact"
+        ? "Context was just compacted. The summary above is a hint, not state: re-derive your position from the tracker (Session start 1-3, then the run-log issue) before any dispatch. Background polls and spawned agents may still be alive; check the task list before spawning a duplicate."
+        : "",
       "",
       body,
     ].join("\n")

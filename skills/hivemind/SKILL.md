@@ -33,6 +33,10 @@ Never skip, every session, in this order:
 4. Baseline on `main`: `gh run list --branch main --limit 1 --json conclusion -q '.[0].conclusion'`; no CI → the gate command from `## Learned` with `>/dev/null 2>&1; echo $?`. Red → stabilise ticket first (`bootstrap.md`), no feature dispatch.
 5. No open run → the human's message is the work order; step 1. Any `NO` in `hive-state` → step 0 for the missing pieces only.
 
+## Surviving compaction
+
+Auto-compact and `/compact` keep a summary and drop the rest. The autostart re-injects this skill after every compaction, and the tracker holds every ticket, verdict, and review, so the only thing a compaction can lose is what you decided and had not yet written down. So write it down when it happens, one line each, as a comment on the run-log issue (`tracker.md`): the grilled decisions before `/to-spec` exists, an `UNATTENDED` grant and its limit, every deviation the human allowed, a parked `NEEDS`, the fork point of `hive/<run>`. After a compaction, trust the tracker and the run log over the summary. Past ~120k, `/handoff` and a fresh lead beat a third compaction (`stack.md`).
+
 ## Flow
 
 0. **Bootstrap**: read `references/bootstrap.md`. Detect blank / mid-project / ready and take that path. It ends with `/setup-matt-pocock-skills` run, gates green on `main`, `CONTEXT.md`, `CONVENTIONS.md` (interviewed, never assumed), `AGENTS.md ## Learned`, `teams/` with skills linked (`hive-scout` proposes, human approves; `required.txt` is not negotiable), and the mechanical gates from `references/enforcement.md` (CI workflow, lefthook, commit-msg check, anti-slop lint rules on JS/TS) installed by the scaffold or stabilise ticket. Not there → stop.
