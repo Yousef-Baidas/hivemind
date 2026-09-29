@@ -2,6 +2,12 @@
 
 Proteus source repo. Read `CONTEXT.md` for terms and `CONVENTIONS.md` for rules before touching code.
 
+## Agent skills
+
+- Issue tracker: GitHub Issues on `Yousef-Baidas/proteus` via `gh`; PRs are not a request surface.
+- Domain docs: single context, `CONTEXT.md` at the root, ADRs in `docs/adr/`. Read both before designing; add a term to `CONTEXT.md` when you name a new concept.
+- Triage labels: none (the `triage` skill is not installed).
+
 ## Learned
 
 - domain: code (Node CLI installer + hooks + markdown skills); zero dependencies.
