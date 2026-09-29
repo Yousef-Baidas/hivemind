@@ -10,7 +10,7 @@ Cross-cutting agents, every domain: `proteus-security-verifier` (second verifier
 
 ## The roster
 
-Software repos start from the shipped teams `frontend`, `backend`, `devops`, `security`, `qa`. Any other project, or a software project the shipped teams do not fit, gets a roster designed for it: `proteus-scout` (`top`) reads the repo, `CONTEXT.md`, and the work order, and proposes teams as the real-world roles a studio or firm would staff (`domains.md`). The human approves the roster before anything is written. A worker then writes each `PROFILE.md` and, where the craft needs one, `CRAFT.md`.
+Software repos start from the shipped teams `frontend`, `backend`, `devops`, `security`, `qa` (`templates/teams/` in the Proteus checkout, copied to the repo's `teams/` by `install.js --project`). Any other project, or a software project the shipped teams do not fit, gets a roster designed for it: `proteus-scout` (`top`) reads the repo, `CONTEXT.md`, and the work order, and proposes teams as the real-world roles a studio or firm would staff (`domains.md`). The human approves the roster before anything is written. A worker then writes each `PROFILE.md` and, where the craft needs one, `CRAFT.md`.
 
 `PROFILE.md` shape, 40 lines at most:
 

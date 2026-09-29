@@ -39,10 +39,12 @@ const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
-const L = require("./teams/link-skills.js");
+const L = require(path.join(__dirname, "templates", "teams", "link-skills.js"));
 const { WIN, lstat, real, isDir, isFile, samePath, removeLink, linkDir } = L;
 
 const HERE = __dirname;
+// the shipped roster; teams/ in any repo, this checkout included, is that repo's own
+const SHIPPED_TEAMS = path.join(HERE, "templates", "teams");
 const HOME = os.homedir();
 const CLAUDE = path.join(HOME, ".claude");
 const SKILLS = ["proteus", "proteus-review"];
@@ -123,10 +125,12 @@ function copyFile(src, dest) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
 }
-function copyTree(src, dest) {
+// skip: source paths left out, with everything under them
+function copyTree(src, dest, skip = []) {
   for (const e of fs.readdirSync(src, { withFileTypes: true })) {
     const s = path.join(src, e.name), d = path.join(dest, e.name);
-    if (e.isDirectory()) copyTree(s, d); else copyFile(s, d);
+    if (skip.some((x) => samePath(s, x))) continue;
+    if (e.isDirectory()) copyTree(s, d, skip); else copyFile(s, d);
   }
 }
 
@@ -402,18 +406,21 @@ function excludeLocal(root, list = EXCLUDE, what = "settings.local.json, Proteus
 function teamsIgnore(teams, act) {
   const ign = path.join(teams, ".gitignore"), text = readText(ign);
   const have = (text || "").split(/\r?\n/);
-  const add = fs.readFileSync(path.join(HERE, "teams", ".gitignore"), "utf8").split(/\r?\n/).filter((l) => l && !l.startsWith("#") && !have.includes(l));
-  if (act && text === null) fs.copyFileSync(path.join(HERE, "teams", ".gitignore"), ign);
+  const add = fs.readFileSync(path.join(SHIPPED_TEAMS, ".gitignore"), "utf8").split(/\r?\n/).filter((l) => l && !l.startsWith("#") && !have.includes(l));
+  if (act && text === null) fs.copyFileSync(path.join(SHIPPED_TEAMS, ".gitignore"), ign);
   else if (act && add.length) fs.appendFileSync(ign, (text && !text.endsWith("\n") ? "\n" : "") + add.join("\n") + "\n");
   return add;
 }
 
 function copyTeams(root) {
   const teams = path.join(root, "teams");
+  // self-host: the checkout's own templates/ and link scripts are the source, never copied into git
+  const self = samePath(real(root), real(HERE));
   fs.mkdirSync(teams, { recursive: true });
   teamsIgnore(teams, true);
-  for (const f of LINK_SCRIPTS) copyFile(path.join(HERE, "teams", f), path.join(teams, f));
-  copyTree(path.join(HERE, "templates"), path.join(teams, "templates"));
+  if (!self) for (const f of LINK_SCRIPTS) copyFile(path.join(SHIPPED_TEAMS, f), path.join(teams, f));
+  copyTree(path.join(HERE, "templates"), path.join(teams, "templates"), [SHIPPED_TEAMS]);
+  if (self) excludeLocal(root, ["teams/templates/"], "teams/templates, a copy of this checkout's templates/");
   // renamed to worktree-settings.local.json; drop the old copy only if nobody edited it
   const stale = path.join(teams, "templates", "hooks", "settings.local.json");
   const t = readText(stale);
@@ -423,9 +430,9 @@ function copyTeams(root) {
     log("removed  teams/templates/hooks/settings.local.json (renamed to worktree-settings.local.json)");
   }
   // the routing table is the repo's once copied, like PROFILE.md
-  if (!lstat(path.join(teams, "ROUTING.md"))) fs.copyFileSync(path.join(HERE, "teams", "ROUTING.md"), path.join(teams, "ROUTING.md"));
-  for (const p of L.profiles(path.join(HERE, "teams"))) {
-    const src = path.join(HERE, "teams", p), dest = path.join(teams, p);
+  if (!lstat(path.join(teams, "ROUTING.md"))) fs.copyFileSync(path.join(SHIPPED_TEAMS, "ROUTING.md"), path.join(teams, "ROUTING.md"));
+  for (const p of L.profiles(SHIPPED_TEAMS)) {
+    const src = path.join(SHIPPED_TEAMS, p), dest = path.join(teams, p);
     fs.mkdirSync(dest, { recursive: true });
     for (const f of ["PROFILE.md", "skills.txt"]) {
       if (isFile(path.join(src, f)) && !lstat(path.join(dest, f))) fs.copyFileSync(path.join(src, f), path.join(dest, f));
@@ -433,7 +440,7 @@ function copyTeams(root) {
     // required.txt is the pipeline's, not the scout's or the repo's: always refreshed
     if (isFile(path.join(src, "required.txt"))) copyFile(path.join(src, "required.txt"), path.join(dest, "required.txt"));
   }
-  log(`teams    -> ${teams} (ROUTING.md, PROFILE.md, skills.txt, link-skills.*, templates/)`);
+  log(`teams    -> ${teams} (ROUTING.md, PROFILE.md, skills.txt, ${self ? "" : "link-skills.*, "}templates/)`);
 }
 
 function projectInstall(root, opt) {
@@ -671,7 +678,6 @@ function install(opt) {
   if (!nodeOk()) die(`node ${process.versions.node} is older than ${NODE_MIN}, which the required context-mode plugin needs. Upgrade: ${nodeFix()}, then re-run`);
   const autoUpdate = opt.autoUpdate ? true : opt.noAutoUpdate ? false : undefined;
   const root = process.cwd();
-  if (opt.project && samePath(real(root), real(HERE))) die("--project sets up your repo; run it from there, not from the Proteus checkout");
   if (opt.project && samePath(real(root), real(HOME))) die("--project sets up a repo; run it from the repo root, not from your home directory");
   const fresh = !lstat(CONFIG) && !lstat(OLD_CONFIG);
   const repoOld = opt.project ? [...migrateProject(root, false).harnesses] : [];
@@ -760,9 +766,11 @@ function tourDone() {
 async function doctor(fix) {
   const root = process.cwd();
   const top = git(["rev-parse", "--show-toplevel"], root);
-  const inRepo = top.ok && !samePath(real(top.out), real(HERE));
-  const hive = inRepo && isDir(path.join(root, "teams"));
   const cxh = codex();
+  // the checkout gets project checks once --project has set it up (self-host)
+  const checkout = top.ok && samePath(real(top.out), real(HERE));
+  const inRepo = top.ok && (!checkout || isProteusProject(top.out, cxh ? "codex" : "claude"));
+  const hive = inRepo && isDir(path.join(root, "teams"));
   const self = `node "${path.join(HERE, "install.js")}"${cxh ? " --harness codex" : ""}`;
   const hd = cxh ? ".codex" : ".claude";
   const checks = [];
@@ -878,8 +886,8 @@ async function doctor(fix) {
   });
 
   if (!inRepo) {
-    const where = top.ok ? "in the Proteus checkout" : "not inside a git repo";
-    check(() => ["WARN", `${where}; project checks skipped`, "cd into your repo and re-run"]);
+    const where = top.ok ? "in the Proteus checkout, not set up for self-host" : "not inside a git repo";
+    check(() => ["WARN", `${where}; project checks skipped`, top.ok ? `${self} --project, or cd into your repo and re-run` : "cd into your repo and re-run"]);
   } else {
     check(() => {
       const remotes = git(["remote", "-v"], root).out;
@@ -933,7 +941,7 @@ async function doctor(fix) {
           .filter(([, name]) => name && !real(path.join(dir(p), name))).length]).filter(([, n]) => n);
         const ign = teamsIgnore(teams, false);
         if (ign.length) return ["FIX", `teams/.gitignore lacks ${ign.join(", ")} (skill links would be committed)`, `${self} --project`];
-        return unlinked.length ? ["FIX", `team skills not linked (${unlinked.map(([p, n]) => `${p} ${n}`).join(", ")})`, `node "${path.join(HERE, "teams", "link-skills.js")}" --install`]
+        return unlinked.length ? ["FIX", `team skills not linked (${unlinked.map(([p, n]) => `${p} ${n}`).join(", ")})`, `node "${path.join(SHIPPED_TEAMS, "link-skills.js")}" --install`]
           : ["ok", "team skills linked"];
       }, () => { teamsIgnore(path.join(root, "teams"), true); L.run({ root, log }); });
       // CI runs the gate on a clean checkout: the file it names must be tracked (a Codex-only repo
