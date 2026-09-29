@@ -21,7 +21,7 @@ caveman owns prose, ponytail owns code size, rtk + context-mode own tool output.
 Never two graph tools on one role. Workers get no repo tour; if one asks for context, fix the ticket. Missing tool → note once in the task list, continue.
 
 ## Context budget (200k lead)
-Lead never reads worker output or diffs; the verifier does. Lead never produces a deliverable either; a fix is a decision dispatched to Sonnet or Opus. Lead holds: skill, issue numbers, contracts, task list, one-line verdicts. Never a raw `gh issue view`; always `--json … -q`. `hive-journal.js` meters context from the transcript: at `HIVE_HANDOFF_AT` (default 150000 tokens) it tells the lead to finish the step, log the position, and `/handoff`; at `HIVE_HANDOFF_HARD` (default 180000) the guard refuses new `Agent` spawns until it does. Workers and verifiers are unaffected by a lead restart. Set both lower on a 200k model if compaction still fires first.
+Lead never reads worker output or diffs; the verifier does. Lead never produces a deliverable either; a fix is a decision dispatched to a worker on the ladder. Lead holds: skill, issue numbers, contracts, task list, one-line verdicts. Never a raw `gh issue view`; always `--json … -q`. `hive-journal.js` meters context from the transcript: at `HIVE_HANDOFF_AT` (default 150000 tokens) it tells the lead to finish the step, log the position, and `/handoff`; at `HIVE_HANDOFF_HARD` (default 180000) the guard refuses new `Agent` spawns until it does. Workers and verifiers are unaffected by a lead restart. Set both lower on a 200k model if compaction still fires first.
 
 ## Worktrees
 ```

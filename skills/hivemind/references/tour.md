@@ -14,7 +14,7 @@ The checkout is `hivemind-src` in `hive-state`; with no state line (typed `/hive
 
 ## new
 
-1. **What it is.** You hand over work bigger than one agent should do alone. The lead (this session) only decides and writes briefs; Sonnet and Opus workers deliver in their own git worktrees; an Opus verifier gates every merge; you gate every milestone. Agents never chat; they share tickets and reports on GitHub.
+1. **What it is.** You hand over work bigger than one agent should do alone. The lead (this session) only decides and writes briefs; workers on your model or cheaper ones deliver in their own git worktrees, never above it; a verifier gates every merge; you gate every milestone. Agents never chat; they share tickets and reports on GitHub.
 2. **Your part.** Give a work order in plain words. Before any spec the lead needs six things: the outcome you will see, how you check it is done, what is out of scope, the areas touched, constraints, and no open question. Any blank → it asks you, one question at a time, as a picker. At bootstrap you also approve the team roster and answer a short conventions interview once; that file (`CONVENTIONS.md`) is yours.
 3. **Reviews.** Each milestone ends in a `Review:` issue: what changed, steps to check it in under ten minutes, the likeliest mistakes, evidence. Review in a second terminal with `HIVEMIND=0 claude` then `/hivemind-review`, or on GitHub by commenting `ACCEPT` or `CHANGES` plus one line per problem. Merging into `main` is always yours.
 4. **While it runs.** Type `status` (where the run is), `questions` (answer waiting questions), `pause` and `resume`, `revision` (fast rounds of small tweaks). "Remember this" turns a correction into a lesson so it never recurs. The status line shows `hive: N questions · M reviews` when something waits on you. Going to sleep? Say so; it continues only on the reply `UNATTENDED`.
@@ -23,5 +23,5 @@ The checkout is `hivemind-src` in `hive-state`; with no state line (typed `/hive
 
 ## whats-new
 
-1. Spawn one Sonnet subagent: "In `<hivemind-src>`, read `git log --reverse --format='%h %s%n%b' <toured>..HEAD` and `git diff <toured>..HEAD -- README.md skills/`. Return at most eight lines, one per change a user of hivemind would notice (new command, new behaviour, something removed or renamed, a step that now asks them something), each in plain words with what they do differently. Nothing internal." `<toured>` is `toured` in `~/.claude/hivemind.json`.
+1. Spawn one `mid` subagent: "In `<hivemind-src>`, read `git log --reverse --format='%h %s%n%b' <toured>..HEAD` and `git diff <toured>..HEAD -- README.md skills/`. Return at most eight lines, one per change a user of hivemind would notice (new command, new behaviour, something removed or renamed, a step that now asks them something), each in plain words with what they do differently. Nothing internal." `<toured>` is `toured` in `~/.claude/hivemind.json`.
 2. Stop one: "hivemind changed since your last tour:" and the lines. Stop two, only if the human picks a line to go into: that change in six lines, from the reference it touched. Then end.

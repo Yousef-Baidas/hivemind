@@ -10,7 +10,7 @@ Cross-cutting agents, every domain: `hive-security-verifier` (second verifier on
 
 ## The roster
 
-Software repos start from the shipped teams `frontend`, `backend`, `devops`, `security`, `qa`. Any other project, or a software project the shipped teams do not fit, gets a roster designed for it: `hive-scout` (Opus) reads the repo, `CONTEXT.md`, and the work order, and proposes teams as the real-world roles a studio or firm would staff (`domains.md`). The human approves the roster before anything is written. A worker then writes each `PROFILE.md` and, where the craft needs one, `CRAFT.md`.
+Software repos start from the shipped teams `frontend`, `backend`, `devops`, `security`, `qa`. Any other project, or a software project the shipped teams do not fit, gets a roster designed for it: `hive-scout` (`top`) reads the repo, `CONTEXT.md`, and the work order, and proposes teams as the real-world roles a studio or firm would staff (`domains.md`). The human approves the roster before anything is written. A worker then writes each `PROFILE.md` and, where the craft needs one, `CRAFT.md`.
 
 `PROFILE.md` shape, 40 lines at most:
 
@@ -33,7 +33,7 @@ Per team, `teams/<team>/skills.txt`, one `<owner/repo> <skill-name>` per line, r
 
 `teams/<team>/required.txt`, same format, is the pipeline's: `install-anti-slop` for devops on code, `thermo-nuclear-code-quality-review` for qa on code. The scout never rewrites it, it does not count against the eight, and `install.js --project` refreshes it. A missing required skill stops the run.
 
-Models: workers are Sonnet (`standard`) or Opus (`hard`); team and security verifiers are Opus; the scout is Opus; QA is Sonnet per wave, Opus per milestone and at close; the guide is Sonnet. Haiku and the lead's own model never produce or review work.
+Models, from the ladder (`models=` in `hive-state`): workers are `mid` (`standard`) or `top` (`hard`); team and security verifiers are `top`; the scout is `top`; QA is `mid` per wave, `top` per milestone and at close; the guide is `mid`. On a Sonnet lead both are Sonnet; nothing runs above the lead, and a once-per-project model (Fable by default) is only ever the lead.
 
 ## Routing
 

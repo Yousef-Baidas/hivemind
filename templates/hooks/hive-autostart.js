@@ -39,7 +39,7 @@ lib.run((ev) => {
   const runs = hiveBranches(root);
   const src = ev.source;
   const tour = home && (src === "startup" || src === "clear") ? safe(() => tourState(home, cfg), "") : "";
-  const state = localState(root, runs, home, behind) + " " + safe(() => inboxState(root), "inbox=unknown");
+  const state = localState(root, runs, home, behind) + " " + safe(() => inboxState(root), "inbox=unknown") + " " + safe(() => models(ev, root), "models=unknown");
   if (tour) notes.push(tourOffer(tour));
   safe(() => scratchSweep(root));
 
@@ -206,6 +206,14 @@ function humanSaid(root) {
   const said = lines.map((l) => safe(() => JSON.parse(l).prompt, "")).filter((p) => typeof p === "string" && p.trim())
     .map((p) => "- " + (p.length > 400 ? p.slice(0, 400) + "…" : p).replace(/\n/g, "\n  "));
   return said.length ? ["human said (verbatim, newest last):", ...said].join("\n") : "";
+}
+
+// the ladder for this session: the lead's model, and the two the lead spawns on
+function models(ev, root) {
+  safe(() => lib.saveLead(ev, root));
+  const c = lib.modelCaps(ev, root);
+  const lead = c.leadRung >= 0 ? c.ladder[c.leadRung] : "unknown";
+  return `models=lead:${lead},top:${c.top},mid:${c.mid}`;
 }
 
 // the required context-mode plugin: installed and enabled at user scope (two small file reads)

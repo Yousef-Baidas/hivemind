@@ -64,7 +64,7 @@ Run <run>, branch hive/<run>, mode <wave|milestone|close>. Tickets: #<n>, … Me
 Follow teams/qa/PROFILE.md for that mode. Also: a clean rebuild of every deliverable from the branch alone reproduces the merged evidence. One verdict line; findings as issue comments or new issues per the profile. Fix nothing.
 ```
 
-## Scout (bootstrap, Opus)
+## Scout (bootstrap, `top`)
 ```
 Domain: <domain>. Work order: <one paragraph>. Read CONTEXT.md, manifests, and skills/hivemind/references/domains.md from the hivemind checkout (<path>).
 <shipped software teams fit: rewrite teams/*/skills.txt only.>
@@ -73,4 +73,4 @@ Skills from skills.sh and installed plugins, ranked by installs and fit to this 
 ```
 
 ## Lead pre-dispatch check
-Every ticket is a tracker issue with milestone, `profile:<team>` from `ROUTING.md`, difficulty. Owned paths inside the team's `Owns`. Contract and check committed per ticket, each shown red twice. No shared file owners in this wave, no shared binary with two writers. Hotspot tickets merged. The Agent call says `sonnet` or `opus`; no Haiku, no inherited model. `CONVENTIONS.md` exists and its taste docs are in the brief. The milestone's debt issue exists. No human review open. `hive/<run>` protected. Each worktree prepared by `hive-worktree.js`. Stall check armed. I produced no deliverable and resolved no conflict; every fix I decided went out as a ticket or a `BACK-TO-WORKER`.
+Every ticket is a tracker issue with milestone, `profile:<team>` from `ROUTING.md`, difficulty. Owned paths inside the team's `Owns`. Contract and check committed per ticket, each shown red twice. No shared file owners in this wave, no shared binary with two writers. Hotspot tickets merged. The Agent call names `top` or `mid` from `models=`; never a missing, higher, once-per-project, or under-floor model. `CONVENTIONS.md` exists and its taste docs are in the brief. The milestone's debt issue exists. No human review open. `hive/<run>` protected. Each worktree prepared by `hive-worktree.js`. Stall check armed. I produced no deliverable and resolved no conflict; every fix I decided went out as a ticket or a `BACK-TO-WORKER`.

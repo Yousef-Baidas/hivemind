@@ -297,6 +297,77 @@ function readInbox(common) {
   const c = readJSON(inboxFile(common), null);
   return c && Array.isArray(c.questions) && Array.isArray(c.reviews) ? c : null;
 }
+// ---- model ladder: the lead is whatever model the session runs; no agent goes above it.
+// Rungs cheapest first. ~/.claude/hivemind.json "models": { ladder, floor, solo } overrides the
+// defaults; a project's `models:` line in AGENTS.md (the human's call, e.g. `models: solo=none
+// floor=haiku`) overrides floor and solo. A solo model never runs as a subagent: at most one per
+// project, and that one is the lead when the session runs on it.
+const MODEL_DEFAULTS = { ladder: ["haiku", "sonnet", "opus", "fable"], floor: "sonnet", solo: ["fable"] };
+
+// ladder index of a model name or id ("claude-opus-5-5[1m]" → opus); the longest matching rung wins
+function rungOf(ladder, name) {
+  const n = String(name || "").toLowerCase();
+  let best = -1;
+  ladder.forEach((r, i) => { if (n.includes(r) && (best < 0 || r.length > ladder[best].length)) best = i; });
+  return best;
+}
+
+// the session's model: the event's (SessionStart carries it), else the newest main-thread reply's
+function leadModel(ev) {
+  const m = ev && ev.model;
+  const direct = typeof m === "string" ? m : m && typeof m === "object" ? m.id || m.display_name || "" : "";
+  if (direct) return String(direct);
+  for (const e of entriesBackward(tailLines(ev && ev.transcript_path))) {
+    const id = e.message && (e.type === "assistant" || e.message.role === "assistant") && e.message.model;
+    if (typeof id === "string" && id && !id.startsWith("<")) return id;
+  }
+  return "";
+}
+
+// the model SessionStart reported, kept by the autostart for when the transcript tail has no reply
+const leadFile = (root) => { const c = gitCommonDir(root); return c ? path.join(hiveDir(c), "lead-model.json") : null; };
+function saveLead(ev, root) {
+  const f = leadFile(root);
+  const m = leadModel({ model: ev.model });
+  if (f && m && ev.session_id) writeJSON(f, { session: ev.session_id, model: m });
+}
+function savedLead(ev, root) {
+  const f = leadFile(root);
+  const saved = f ? readJSON(f, null) : null;
+  return saved && saved.session === ev.session_id && typeof saved.model === "string" ? saved.model : "";
+}
+
+function modelPolicy(root) {
+  const cfg = (hivemindConfig().models || {});
+  const list = (v) => (Array.isArray(v) ? v : String(v || "").split(",")).map((x) => String(x).trim().toLowerCase()).filter((x) => x && x !== "none");
+  const ladder = Array.isArray(cfg.ladder) && cfg.ladder.length ? list(cfg.ladder) : MODEL_DEFAULTS.ladder;
+  const pol = { ladder, floor: String(cfg.floor || MODEL_DEFAULTS.floor).toLowerCase(), solo: "solo" in cfg ? list(cfg.solo) : MODEL_DEFAULTS.solo };
+  let agents = "";
+  try { agents = fs.readFileSync(path.join(root, "AGENTS.md"), "utf8"); } catch {}
+  const line = /^models:(.*)$/m.exec(agents);
+  if (line) {
+    for (const [, k, v] of line[1].matchAll(/(\w+)=(\S+)/g)) {
+      if (k === "floor") pol.floor = v.toLowerCase();
+      if (k === "solo") pol.solo = list(v);
+    }
+  }
+  return pol;
+}
+
+// what this session may spawn: top (hard tickets, every verdict) and mid (standard tickets, helpers)
+function modelCaps(ev, root) {
+  const pol = modelPolicy(root);
+  const { ladder, solo } = pol;
+  const lead = leadModel(ev) || savedLead(ev, root);
+  const L = rungOf(ladder, lead);
+  // highest rung at or under the lead that is not solo (the lead is that one instance); unknown lead: the whole ladder
+  let cap = L < 0 ? ladder.length - 1 : L;
+  while (cap > 0 && solo.includes(ladder[cap])) cap--;
+  const fl = rungOf(ladder, pol.floor);
+  const floor = Math.min(fl < 0 ? 0 : fl, cap); // a lead below the floor takes the floor down with it
+  return { ladder, solo, lead, leadRung: L, cap, floor, top: ladder[cap], mid: ladder[Math.max(floor, cap - 1)], floorName: ladder[floor] };
+}
+
 // gh query → cache; on any gh failure the old cache stays and null is returned
 function refreshInbox(root, common, timeout = 10000) {
   let list;
@@ -313,5 +384,5 @@ module.exports = {
   readInbox, refreshInbox, inboxFile,
   run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, hiveDir, readJSON, writeJSON,
   configFile, hivemindConfig, relPath, gitRoot, runOpen, ownedMatch, ownedDenial, tailLines, contextTokens, lastAssistantText, lastHumanPrompt, envInt, git, gh,
-  workerDenial, deny, additionalContext, registerLeadHooks, syncFile, LEAD_HOOKS, WAIT_MSG, EDIT_LAST_MSG,
+  workerDenial, deny, additionalContext, rungOf, leadModel, saveLead, modelPolicy, modelCaps, registerLeadHooks, syncFile, LEAD_HOOKS, WAIT_MSG, EDIT_LAST_MSG,
 };

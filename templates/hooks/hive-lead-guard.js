@@ -2,8 +2,9 @@
 // Claude Code PreToolUse hook for the lead's session (main checkout).
 // Main thread:
 // 1. The lead writes no code: Edit/Write inside the repo is refused except the docs it owns.
-// 2. Only Sonnet and Opus write or review code: an Agent call naming haiku or fable,
-//    or a non-hive agent with no model (it would inherit the lead's), is refused.
+// 2. The model ladder (hive-lib modelCaps): every Agent call names its model; one above the
+//    lead's, a solo model (Fable by default: the lead is its one instance), or one under the
+//    floor (Haiku by default) is refused.
 // 3. Context at HIVE_HANDOFF_HARD (default 180000) or above: no new Agent spawns.
 // 4. `--edit-last` is refused: every agent posts as the same GitHub account.
 // 5. The lead does not Read images (renders cost ~1.5k tokens each) unless the human's
@@ -47,10 +48,8 @@ lib.run((ev) => {
   if (lib.isLinked(root)) return;
 
   if (tool === "Agent" || tool === "Task") {
-    const model = String(ti.model || "").toLowerCase();
-    const type = String(ti.subagent_type || "");
-    if (/haiku|fable|mythos/.test(model)) lib.deny(`model "${ti.model}" may not write or review code. Use sonnet (standard) or opus (hard, verify).` + BYPASS);
-    if (!model && !type.startsWith("hive-")) lib.deny(`agent "${type || "default"}" with no model inherits the lead's. Pass model: "sonnet" or "opus".` + BYPASS);
+    const why = modelDenial(lib.modelCaps(ev, root), ti.model);
+    if (why) lib.deny(why + BYPASS);
     const ctx = lib.contextTokens(ev);
     if (ctx >= lib.envInt("HIVE_HANDOFF_HARD", 180000)) lib.deny(`context at ${Math.round(ctx / 1000)}k: /handoff before dispatching more.`);
     return;
@@ -65,8 +64,20 @@ lib.run((ev) => {
   const rel = lib.relPath(root, target);
   if (!rel) return; // outside the repo: temp issue bodies, memory
   if (LEAD_MAY_WRITE.some((re) => re.test(rel))) return;
-  lib.deny(`the lead does not edit ${rel}. Decide the fix, then dispatch it to a hive-<profile>-worker (sonnet or opus).` + BYPASS);
+  lib.deny(`the lead does not edit ${rel}. Decide the fix, then dispatch it to a hive-<profile>-worker (model per the ladder).` + BYPASS);
 });
+
+// the ladder: every spawn names its model, never above the lead's rung, never a solo model, never under the floor
+function modelDenial(c, name) {
+  const use = `use "${c.top}" for hard tickets and every verdict, "${c.mid}" for standard tickets and helpers`;
+  if (!name) return `every Agent call names its model (the agent's default may sit above the lead's): ${use}.`;
+  const r = lib.rungOf(c.ladder, name);
+  if (r < 0) return `model "${name}" is not on the ladder (${c.ladder.join(" < ")}); ${use}.`;
+  if (c.solo.includes(c.ladder[r])) return `${c.ladder[r]} runs once per project${c.leadRung === r ? " and the lead is it" : ""}; ${use}. The human lifts this with a \`models: solo=none\` line in AGENTS.md.`;
+  if (r > c.cap) return `model "${name}" is above the lead (${c.lead || "unknown"}); nothing above ${c.top}: ${use}.`;
+  if (r < c.floor) return `model "${name}" is under the floor (${c.floorName}); it does not produce or review work: ${use}.`;
+  return "";
+}
 
 // the escape hatch: the human's latest prompt names the file; any doubt denies
 function humanNamed(ev, target) {
@@ -78,7 +89,7 @@ function humanNamed(ev, target) {
 
 function denyImage(target) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
-    permissionDecisionReason: `hivemind: the lead does not open images (each costs ~1.5k tokens of lead context). Spawn a Sonnet subagent: "Read ${target}; answer in 5 lines: <what to check>", or post the path on the review issue for the human. HIVEMIND=0 claude skips this guard.` } }));
+    permissionDecisionReason: `hivemind: the lead does not open images (each costs ~1.5k tokens of lead context). Spawn a subagent on the ladder's mid model: "Read ${target}; answer in 5 lines: <what to check>", or post the path on the review issue for the human. HIVEMIND=0 claude skips this guard.` } }));
 }
 
 // a subagent's edit: owned paths in any checkout that lists them; the main checkout is off limits during a run

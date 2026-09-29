@@ -12,14 +12,14 @@ The usual multi-agent loop bleeds tokens in three places: the lead sits inside t
 - Workers run their team's checks themselves (typecheck, lint, tests on code; render probes, loudness, link checks, model recompute elsewhere), loop to green, and cap at 2 retries. Every check is shown failing on deliberately broken input before any worker starts, so a green check means something.
 - Escalation sends only the diff plus failing output to a fresh-context verifier. One pass.
 - Independent tickets run in parallel, one git worktree each, merged sequentially.
-- Only Sonnet and Opus produce or review work: Sonnet for `standard` tickets, Opus for `hard` tickets and every verdict. Fable leads by decision alone. Haiku touches nothing; a hook refuses the spawn.
+- The lead is whatever model you start the session on, and nothing runs above it (see [Models](#models)). Hard tickets and every verdict run on the lead's tier, standard tickets one rung down. A hook refuses any other spawn.
 - The pipeline is fixed. A step is skipped or added only when you say so or a `/research` finding does.
 
 Context cost: the description is ~60 tokens per session. The body loads only on `/hivemind` (~1,000 tokens). `references/roles.md` loads at spawn time, `references/stack.md` on first run in a repo, `references/commits.md` when an agent commits. Every other reference loads only at the step that names it, so the lead pays for what the run actually uses.
 
 ## Any kind of project
 
-The pipeline is the same everywhere; the teams, deliverables, and checks change with the domain (`references/domains.md`). On a software repo the shipped teams (frontend, backend, devops, security, qa) apply. On anything else, `hive-scout` (Opus) reads the project and proposes a roster of real-world roles: for a Blender scene, art direction, modelling, materials, lighting, camera, render/post; for a business plan, market research, financial modelling, strategy, legal/risk, editing. Each team gets an `Owns` line, its own checks (mechanical first, a rubric for taste), research sources a senior in that role trusts, a `CRAFT.md` playbook with cited numbers, and skills from [skills.sh](https://skills.sh) picked for this project's specifics. You approve the roster before anything is written.
+The pipeline is the same everywhere; the teams, deliverables, and checks change with the domain (`references/domains.md`). On a software repo the shipped teams (frontend, backend, devops, security, qa) apply. On anything else, `hive-scout` (the lead's tier) reads the project and proposes a roster of real-world roles: for a Blender scene, art direction, modelling, materials, lighting, camera, render/post; for a business plan, market research, financial modelling, strategy, legal/risk, editing. Each team gets an `Owns` line, its own checks (mechanical first, a rubric for taste), research sources a senior in that role trusts, a `CRAFT.md` playbook with cited numbers, and skills from [skills.sh](https://skills.sh) picked for this project's specifics. You approve the roster before anything is written.
 
 Three rules hold in every domain: everything reproducible lives in git (scripts, sources, manifests; nothing only in `out/` or a GUI session); every check can go red; every probe prints what it measured. Tickets that rest on outside facts start with `/research` and cite primary sources.
 
@@ -28,7 +28,7 @@ Three rules hold in every domain: everything reproducible lives in git (scripts,
 `install.js --project` registers the lead's hooks in the repo's `.claude/settings.local.json` (machine-local, untracked):
 
 - **Autostart.** Every session opened in the repo begins as the lead, skill loaded, no `/hivemind` typed. It prints a `hive-state` line from local files (docs present, skills scouted and linked, gates installed, open `hive/*` branches, root docs over budget, lessons, hivemind updates), so the lead skips what is already set up.
-- **Lead guard.** On the main thread, edits inside the repo are refused except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, ADRs, and lessons; an Agent call on Haiku, on the lead's own tier, or with no model on a non-`hive-*` agent is refused; `gh … --edit-last` is refused (every agent posts as you, so an edit can overwrite a ruling). The lead does not open images itself (each render costs it ~1.5k tokens; a subagent or you judge it) unless you name the file. Inside subagents it refuses `run_in_background` and `Monitor` (a worker that waits on a background notification never wakes up) and any edit outside the worker's owned paths.
+- **Lead guard.** On the main thread, edits inside the repo are refused except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, ADRs, and lessons; an Agent call with no model, above the lead's, on a once-per-project model, or under the floor is refused; `gh … --edit-last` is refused (every agent posts as you, so an edit can overwrite a ruling). The lead does not open images itself (each render costs it ~1.5k tokens; a subagent or you judge it) unless you name the file. Inside subagents it refuses `run_in_background` and `Monitor` (a worker that waits on a background notification never wakes up) and any edit outside the worker's owned paths.
 - **Journal and meter.** Every message you type is kept verbatim in `.git/hive/`; context is metered from the transcript, with a warning at 150k and a hard stop on new dispatch at 180k.
 - **Lessons.** Solved problems are recalled only when their trigger fires (below).
 - **Stall check.** A worker that ends its turn "waiting" instead of reporting is sent back to finish.
@@ -36,6 +36,21 @@ Three rules hold in every domain: everything reproducible lives in git (scripts,
 - **Status line.** `hive: 2 questions · 1 review` at the bottom of the terminal while anything waits on you, and `hivemind: update ready` when the checkout is behind, appended to your own status line.
 
 `HIVEMIND=0 claude` opens a plain session with none of them, for the review session or for working by hand.
+
+## Models
+
+The session you start is the lead, on whatever model you started it with, and it staffs down from there on a ladder, cheapest first: `haiku < sonnet < opus < fable`. The autostart prints `models=lead:…,top:…,mid:…`; the guard enforces it on every spawn.
+
+| You start on | Lead | Hard tickets, verdicts, scout (`top`) | Standard tickets, helpers (`mid`) |
+|---|---|---|---|
+| Fable | Fable | Opus | Sonnet |
+| Opus | Opus | Opus | Sonnet |
+| Sonnet | Sonnet | Sonnet | Sonnet |
+
+- Nothing runs above the lead. A worker may run on the lead's own model.
+- Fable is once per project: the lead is its one instance, so a Fable lead staffs Opus and below. Lift it with a line in `AGENTS.md` under `## Learned`: `models: solo=none`.
+- Haiku is under the floor: it does not produce or review work until it earns it. `models: floor=haiku` in `AGENTS.md` lowers the floor for a project; a Haiku lead lowers it on its own, so everything runs on Haiku.
+- Machine-wide defaults live in `~/.claude/hivemind.json`: `"models": { "ladder": ["haiku", "sonnet", "opus", "fable"], "floor": "sonnet", "solo": ["fable"] }`. Claude Code passes a subagent's model as one of these aliases, so a rung is a family, not a version.
 
 ## Asks before it guesses
 
@@ -92,7 +107,7 @@ The shipped `skills.txt` files are only a starting set for software. At bootstra
 Two skills are the pipeline's, not the scout's; they live in `teams/<profile>/required.txt` and never count against the cap.
 
 - [anti-slop](https://github.com/dmmulroy/anti-slop) — on JS/TS the scaffold or stabilise ticket vendors its oxlint rules into the lint gate. After that slop fails lint in the worker, in lefthook, and in CI, at zero agent tokens.
-- [thermo-nuclear-code-quality-review](https://github.com/cursor/plugins/tree/main/cursor-team-kit/skills/thermo-nuclear-code-quality-review) — the QA pass applies it on Opus to every milestone diff; its blockers are tickets and the human gate stays shut until they merge. Per milestone, not per ticket: on a forty-line diff it demands rewrites nobody asked for.
+- [thermo-nuclear-code-quality-review](https://github.com/cursor/plugins/tree/main/cursor-team-kit/skills/thermo-nuclear-code-quality-review) — the QA pass applies it on the lead's tier to every milestone diff; its blockers are tickets and the human gate stays shut until they merge. Per milestone, not per ticket: on a forty-line diff it demands rewrites nobody asked for.
 
 At close the same pass runs the scan phase of mattpocock `improve-codebase-architecture` and files up to five deepening candidates on the milestone's debt issue for you to pick from. On a blank TypeScript repo the scaffold worker uses [create-better-t-stack](https://github.com/AmanVarshney01/create-better-t-stack) when the grilled stack is one it offers; the stack picks the tool, never the reverse.
 
@@ -260,7 +275,7 @@ agents/
   hive-security-verifier.md  second verifier on sensitive tickets
   hive-qa-verifier.md        per wave, deep per milestone and at close
   hive-guide.md              review brief + evidence per milestone
-  hive-scout.md              designs the roster and picks skills (Opus)
+  hive-scout.md              designs the roster and picks skills (lead's tier)
 teams/                       copied into your repo by install.js --project
   ROUTING.md                 deliverable type or path -> owning team
   link-skills.js (.sh .ps1)  links (or installs) each team's skills
