@@ -27,13 +27,13 @@ Three rules hold in every domain: everything reproducible lives in git (scripts,
 
 `install.js --project` registers the lead's hooks in the repo's `.claude/settings.local.json` (machine-local, untracked):
 
-- **Autostart.** Every session opened in the repo begins as the lead, skill loaded, no `/proteus` typed. It prints a `proteus-state` line from local files (docs present, skills scouted and linked, gates installed, open `hive/*` branches, root docs over budget, lessons, Proteus updates), so the lead skips what is already set up.
+- **Autostart.** Every session opened in the repo begins as the lead, skill loaded, no `/proteus` typed. It prints a `proteus-state` line from local files (docs present, skills scouted and linked, gates installed, open `proteus/*` branches, root docs over budget, lessons, Proteus updates), so the lead skips what is already set up.
 - **Lead guard.** On the main thread, edits inside the repo are refused except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, ADRs, and lessons; an Agent call with no model, above the lead's, on a once-per-project model, or under the floor is refused; `gh … --edit-last` is refused (every agent posts as you, so an edit can overwrite a ruling). The lead does not open images itself (each render costs it ~1.5k tokens; a subagent or you judge it) unless you name the file. Inside subagents it refuses `run_in_background` and `Monitor` (a worker that waits on a background notification never wakes up) and any edit outside the worker's owned paths.
-- **Journal and meter.** Every message you type is kept verbatim in `.git/hive/`; context is metered from the transcript, with a warning at 150k and a hard stop on new dispatch at 180k.
+- **Journal and meter.** Every message you type is kept verbatim in `.git/proteus/`; context is metered from the transcript, with a warning at 150k and a hard stop on new dispatch at 180k.
 - **Lessons.** Solved problems are recalled only when their trigger fires (below).
 - **Stall check.** A worker that ends its turn "waiting" instead of reporting is sent back to finish.
-- **Scratch.** Agents keep temp files, renders and worktrees in a per-ticket dir under `.git/hive/scratch/`, and anything they leave directly in `/tmp` is ledgered. Both are deleted when the ticket merges or the run closes, with a background sweep for what is left behind; nothing the hive did not create is touched.
-- **Status line.** `hive: 2 questions · 1 review` at the bottom of the terminal while anything waits on you, and `proteus: update ready` when the checkout is behind, appended to your own status line.
+- **Scratch.** Agents keep temp files, renders and worktrees in a per-ticket dir under `.git/proteus/scratch/`, and anything they leave directly in `/tmp` is ledgered. Both are deleted when the ticket merges or the run closes, with a background sweep for what is left behind; nothing Proteus did not create is touched.
+- **Status line.** `proteus: 2 questions · 1 review` at the bottom of the terminal while anything waits on you, and `proteus: update ready` when the checkout is behind, appended to your own status line.
 
 `PROTEUS=0 claude` opens a plain session with none of them, for the review session or for working by hand.
 
@@ -58,7 +58,7 @@ Before any spec the lead must be able to state six things without guessing: the 
 
 ## Survives compaction
 
-Tickets, verdicts, and reviews live in the tracker, and the lead logs every decision that lives nowhere else (grilled answers, an `UNATTENDED` grant, allowed deviations, your hand edits to an artifact, pause positions) as one-line comments on a `Run: <run>` issue labelled `hive-log`. After an auto-compact or `/compact` the autostart re-injects the skill, the run-log tail, and your last ten messages verbatim, which the compaction summary would have paraphrased away. The meter tells the lead to `/handoff` to a fresh session before compaction starts churning.
+Tickets, verdicts, and reviews live in the tracker, and the lead logs every decision that lives nowhere else (grilled answers, an `UNATTENDED` grant, allowed deviations, your hand edits to an artifact, pause positions) as one-line comments on a `Run: <run>` issue labelled `proteus-log`. After an auto-compact or `/compact` the autostart re-injects the skill, the run-log tail, and your last ten messages verbatim, which the compaction summary would have paraphrased away. The meter tells the lead to `/handoff` to a fresh session before compaction starts churning.
 
 ## Learns without bloating
 
@@ -73,7 +73,7 @@ When worker traffic scrolls, a question asked in chat is gone. So the lead asks 
 - A question the whole run waits on (grilling, approving the roster) is a picker pinned at the input, recommended option first; one keypress answers it.
 - Anything else (a worker needs a file it does not own, a new dependency, a routing gap) becomes a `Q:` issue with options and a recommendation. The lead parks only the tickets that depend on it and keeps the rest moving.
 
-The status line at the bottom of the terminal shows `hive: 2 questions · 1 review` until they are answered. Answer when you are free: `/proteus-review` in a second terminal walks every open question as a picker and then every review; typing `questions` in the lead window does the same; or answer from the GitHub app with a comment `ANSWER …`. An answer that states a rule ("always use metric") goes into `CONVENTIONS.md` with your OK, so it is never asked again.
+The status line at the bottom of the terminal shows `proteus: 2 questions · 1 review` until they are answered. Answer when you are free: `/proteus-review` in a second terminal walks every open question as a picker and then every review; typing `questions` in the lead window does the same; or answer from the GitHub app with a comment `ANSWER …`. An answer that states a rule ("always use metric") goes into `CONVENTIONS.md` with your OK, so it is never asked again.
 
 ## Commands mid-run
 
@@ -126,7 +126,7 @@ You review through whichever channel fits:
 - **Issue only** — read the brief on GitHub, comment `ACCEPT` or `CHANGES` plus one line per problem. No AI involved.
 - **Evidence only** — flip through the linked screenshots, then comment.
 
-`ACCEPT` moves on; `CHANGES` turns each line into a ticket and runs the loop again, or runs revision mode when the changes are small tweaks. Verifier follow-ups never become a pile of tickets: they go on one debt issue per milestone, and at close you fix, re-scope, or drop every line. Merging `hive/<run>` into `main` is always yours; the lead opens the PR.
+`ACCEPT` moves on; `CHANGES` turns each line into a ticket and runs the loop again, or runs revision mode when the changes are small tweaks. Verifier follow-ups never become a pile of tickets: they go on one debt issue per milestone, and at close you fix, re-scope, or drop every line. Merging `proteus/<run>` into `main` is always yours; the lead opens the PR.
 
 ### Overnight
 
@@ -134,7 +134,7 @@ Say you are going to sleep, away, or not to wait. The lead prints one warning, w
 
 ## No state in the repo
 
-Proteus writes nothing to your repo but deliverables, checks, contract stubs, lessons, ADRs, and three docs a human wants anyway: `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`. Tickets are issues, the wayfinder map is an issue, the run log is an issue, milestones are milestones, worker reports and `NEEDS` questions are issue comments, verifier verdicts are PR reviews on a per-ticket PR into `hive/<run>`, review briefs are issues labelled `hive-review`, the human's verdict is a comment, the unattended queue is the `needs-human` label. Screenshots go to an orphan `hive-evidence/<run>` branch that is deleted when the run merges. The Agent Teams task list is only a runtime mirror; if the session dies, nothing is lost.
+Proteus writes nothing to your repo but deliverables, checks, contract stubs, lessons, ADRs, and three docs a human wants anyway: `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`. Tickets are issues, the wayfinder map is an issue, the run log is an issue, milestones are milestones, worker reports and `NEEDS` questions are issue comments, verifier verdicts are PR reviews on a per-ticket PR into `proteus/<run>`, review briefs are issues labelled `proteus-review`, the human's verdict is a comment, the unattended queue is the `needs-human` label. Screenshots go to an orphan `proteus-evidence/<run>` branch that is deleted when the run merges. The Agent Teams task list is only a runtime mirror; if the session dies, nothing is lost.
 
 The tracker is GitHub via `gh` today. `references/tracker.md` is an operations table with one column per tracker; Jira or anything else slots in by filling the column.
 
@@ -142,7 +142,7 @@ The tracker is GitHub via `gh` today. `references/tracker.md` is an operations t
 
 Rules in prompts drift; these are mechanical.
 
-- **Branch protection + CI.** The scaffold ticket adds `.github/workflows/hive-gates.yml`; every run protects `hive/<run>` so a PR needs the `gates` check green before GitHub lets it merge. The verifier's `MERGE` is a review comment on the PR (one login cannot approve its own PR).
+- **Branch protection + CI.** The scaffold ticket adds `.github/workflows/proteus-gates.yml`; every run protects `proteus/<run>` so a PR needs the `gates` check green before GitHub lets it merge. The verifier's `MERGE` is a review comment on the PR (one login cannot approve its own PR).
 - **Path ownership.** A `PreToolUse` hook in each worker's worktree refuses any edit outside the ticket's owned paths and tells the worker to file `NEEDS` instead; the verifier also refuses a diff outside the team's `Owns`.
 - **No silent waiting.** Workers cannot background a job and wait for a notification; a stop that says "waiting" is sent back; the lead arms a stall timer per wave.
 - **Commit messages.** lefthook runs a commit-msg check: Conventional Commits, 72 chars, no AI trailer. CI re-checks every commit in the PR, so `--no-verify` does not help.
@@ -225,7 +225,7 @@ cd /path/to/your/repo
 node ~/proteus/install.js --harness codex --project   # teams/, ROUTING.md, the lead's hooks in .codex/
 ```
 
-Codex reads skills from `~/.agents/skills`, so the two skills are linked there. The agents become TOML roles in `$CODEX_HOME/agents` (default `~/.codex/agents`); a role file without the `# generated by proteus` first line is yours and is never overwritten. `--project` registers the lead's hooks in `.codex/hooks.json` and lets git and `gh` run outside the sandbox through `.codex/rules/proteus.rules`; both, and the copied hooks, are excluded from git. It also adds `../<repo>-hive/`, where worker worktrees live, to `writable_roots` in `.codex/config.toml`, so the sandbox lets workers write there. It edits an existing file in place and excludes the file from git only if it created it. The Claude-only hook files (status line, worker settings, commit-msg check) are not copied into `.codex/hooks`. Team skills are also linked into `teams/<team>/.agents/skills/`, and a Codex worker reads them from there itself, since Codex only loads skills between the repo root and the session's cwd. `--confine` does not apply: Codex loads `~/.agents/skills` for every session, so it cannot hide a team skill from the lead.
+Codex reads skills from `~/.agents/skills`, so the two skills are linked there. The agents become TOML roles in `$CODEX_HOME/agents` (default `~/.codex/agents`); a role file without the `# generated by proteus` first line is yours and is never overwritten. `--project` registers the lead's hooks in `.codex/hooks.json` and lets git and `gh` run outside the sandbox through `.codex/rules/proteus.rules`; both, and the copied hooks, are excluded from git. It also adds `../<repo>-proteus/`, where worker worktrees live, to `writable_roots` in `.codex/config.toml`, so the sandbox lets workers write there. It edits an existing file in place and excludes the file from git only if it created it. The Claude-only hook files (status line, worker settings, commit-msg check) are not copied into `.codex/hooks`. Team skills are also linked into `teams/<team>/.agents/skills/`, and a Codex worker reads them from there itself, since Codex only loads skills between the repo root and the session's cwd. `--confine` does not apply: Codex loads `~/.agents/skills` for every session, so it cannot hide a team skill from the lead.
 
 Three steps the installer cannot do for you, once per repo:
 
@@ -262,7 +262,7 @@ node ~/proteus/install.js --doctor         # from a repo root: global and projec
 node ~/proteus/install.js --doctor --fix   # repair links, duplicates, context-mode, hook registration, team skills
 ```
 
-Each line is `ok`, `WARN`, or `FIX`; the exit code is 1 while a `FIX` remains. It checks Node 22.5+, the context-mode plugin (installed and enabled), the skill links and duplicates, agents, attribution, agent teams, `gh` auth, leftovers from hivemind (and repos still on it), the project hooks, `ROUTING.md`, that every listed team skill resolves, and that the commit-msg gate in `lefthook.yml` and `hive-gates.yml` runs a file git tracks.
+Each line is `ok`, `WARN`, or `FIX`; the exit code is 1 while a `FIX` remains. It checks Node 22.5+, the context-mode plugin (installed and enabled), the skill links and duplicates, agents, attribution, agent teams, `gh` auth, leftovers from hivemind (and repos still on it), the project hooks, `ROUTING.md`, that every listed team skill resolves, and that the commit-msg gate in `lefthook.yml` and `proteus-gates.yml` runs a file git tracks.
 
 ### Manual install (any platform)
 
@@ -314,7 +314,7 @@ templates/teams/             the shipped roster, copied into your repo's teams/ 
   <team>/required.txt        pipeline-required skills; the scout never edits it
   skills-lock.json           content hash per linked skill
 templates/
-  ci/hive-gates.yml  lefthook.yml   the gates run teams/templates/hooks/commit-msg.js
+  ci/proteus-gates.yml  lefthook.yml   the gates run teams/templates/hooks/commit-msg.js
   hooks/                     copied to .claude/hooks/ by install-lead-hooks.js:
     proteus-autostart.js    SessionStart: makes the session the lead, prints proteus-state
     proteus-lead-guard.js   the lead never edits deliverables
@@ -332,9 +332,9 @@ tests/hooks.test.js          node tests/hooks.test.js: hooks and installer again
 
 ## Uninstall
 
-Delete the links `~/.claude/skills/proteus` and `~/.claude/skills/proteus-review` (the checkout stays), `~/.claude/agents/proteus-*.md`, `~/.claude/proteus.json`, `teams/` in any repo, and the `proteus-` entries and Proteus `statusLine` in its `.claude/settings.local.json`. `.github/workflows/hive-gates.yml`, `lefthook.yml`, and `.claude/hooks/` are yours to keep or drop; local run state is in `.git/hive/`. Open `hive-*` issues and labels stay on GitHub for you to close. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
+Delete the links `~/.claude/skills/proteus` and `~/.claude/skills/proteus-review` (the checkout stays), `~/.claude/agents/proteus-*.md`, `~/.claude/proteus.json`, `teams/` in any repo, and the `proteus-` entries and Proteus `statusLine` in its `.claude/settings.local.json`. `.github/workflows/proteus-gates.yml`, `lefthook.yml`, and `.claude/hooks/` are yours to keep or drop; local run state is in `.git/proteus/`. Open `proteus` and `proteus-*` issues and labels stay on GitHub for you to close. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
 
-For Codex, also delete the links `~/.agents/skills/proteus` and `proteus-review`, `$CODEX_HOME/agents/proteus-*.toml`, and in each repo the `proteus-` entries in `.codex/hooks.json`, `.codex/hooks/`, `.codex/rules/proteus.rules`, and the `<repo>-hive` entry in `.codex/config.toml`'s `writable_roots`. `codex mcp remove context-mode` drops context-mode.
+For Codex, also delete the links `~/.agents/skills/proteus` and `proteus-review`, `$CODEX_HOME/agents/proteus-*.toml`, and in each repo the `proteus-` entries in `.codex/hooks.json`, `.codex/hooks/`, `.codex/rules/proteus.rules`, and the `<repo>-proteus` entry in `.codex/config.toml`'s `writable_roots`. `codex mcp remove context-mode` drops context-mode.
 
 ## License
 

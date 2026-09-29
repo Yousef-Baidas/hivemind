@@ -285,13 +285,13 @@ function registerLead(root) {
   return { file, changed };
 }
 
-// Worker worktrees live in ../<repo>-hive/, outside the project, where workspace-write rejects a
+// Worker worktrees live in ../<repo>-proteus/, outside the project, where workspace-write rejects a
 // worker's apply_patch. The project's .codex/config.toml adds that folder to writable_roots; a
 // textual merge (no TOML parser here) that refuses any shape it cannot edit safely.
 // Returns {file, dir, created, changed, missing} or {file, dir, error}; write=false only checks.
 function sandboxRoots(root, write = true) {
   const abs = path.resolve(root);
-  const dir = path.join(path.dirname(abs), `${path.basename(abs)}-hive`);
+  const dir = path.join(path.dirname(abs), `${path.basename(abs)}-proteus`);
   const file = path.join(abs, ".codex", "config.toml");
   const entry = JSON.stringify(dir); // a JSON string is a TOML basic string
   const table = `[sandbox_workspace_write]\nwritable_roots = [${entry}]\n`;

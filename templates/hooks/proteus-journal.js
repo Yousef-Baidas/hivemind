@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // UserPromptSubmit hook for the lead's session (main checkout, main thread).
-// 1. Journals every human message verbatim to <git-common-dir>/hive/journal.jsonl (last 500
+// 1. Journals every human message verbatim to <git-common-dir>/proteus/journal.jsonl (last 500
 //    kept); the autostart re-injects the newest ten after a compaction.
 // 2. Nudges the lead to log decisions to the run log.
 // 3. Context meter: at PROTEUS_HANDOFF_AT (default 150000) tokens or above, tells the lead to hand off.
@@ -23,9 +23,9 @@ lib.run((ev, ad) => {
   // task notifications, loop wakeups and peer messages arrive here too; they are not the human
   if (ev.fromHuman && prompt.trim()) {
     const common = lib.gitCommonDir(root);
-    if (common) journal(path.join(lib.hiveDir(common), "journal.jsonl"), { ts: new Date().toISOString(), session_id: ev.session, prompt });
+    if (common) journal(path.join(lib.stateDir(common), "journal.jsonl"), { ts: new Date().toISOString(), session_id: ev.session, prompt });
     if (prompt.length > 40 && !prompt.trimStart().startsWith("/"))
-      out.push("hive: if this message holds a decision, correction, or taste note, log it as one line on the run log before acting.");
+      out.push("proteus: if this message holds a decision, correction, or taste note, log it as one line on the run log before acting.");
   }
 
   const q = questionsNudge(root);
@@ -33,7 +33,7 @@ lib.run((ev, ad) => {
 
   const ctx = ad.contextTokens(ev);
   if (ctx >= lib.envInt("PROTEUS_HANDOFF_AT", 150000))
-    out.push(`hive: context at ${Math.round(ctx / 1000)}k. Finish the current step, log position to the run log, then /handoff and start a fresh lead.`);
+    out.push(`proteus: context at ${Math.round(ctx / 1000)}k. Finish the current step, log position to the run log, then /handoff and start a fresh lead.`);
 
   if (out.length) ad.context(ev, out.join("\n"), "prompt");
 });
@@ -43,7 +43,7 @@ function questionsNudge(root) {
   const common = lib.gitCommonDir(root);
   const inbox = common && lib.readInbox(common);
   if (!inbox || !inbox.questions.length) return "";
-  const stamp = path.join(lib.hiveDir(common), "questions-nudged");
+  const stamp = path.join(lib.stateDir(common), "questions-nudged");
   try { if (Date.now() - fs.statSync(stamp).mtimeMs < 10 * 60 * 1000) return ""; } catch {}
   fs.writeFileSync(stamp, new Date().toISOString() + "\n");
   return `open questions: ${inbox.questions.map((i) => "#" + i.n).join(", ")} (answer via /proteus-review or type questions)`;
