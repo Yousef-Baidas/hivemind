@@ -20,7 +20,7 @@ Your own hands, the whole list: `gh` and `git` state commands read with `--json 
 
 A mattpocock skill the Skill tool refuses (`disable-model-invocation`: `/grill-with-docs`, `/wayfinder`, `/to-spec`, `/to-tickets`, `/handoff`) → read its `SKILL.md` under `~/.claude/plugins/cache/*/mattpocock-skills/*/skills/` and follow it as if invoked; tell a worker the same for `/implement`.
 
-References, each read only when named: `bootstrap.md`, `tracker.md`, `domains.md`, `teams.md` at step 0; `teams.md` again at step 2; `conventions.md` when `CONVENTIONS.md` is missing; `roles.md` when spawning; `review.md` at step 7½; `operations.md` on a command below or a stall; `lessons.md` when a problem is solved after a failed attempt or a human correction, and at step 8; `docs-diet.md` when `doc-bloat` is not `none`; `enforcement.md` when the scaffold or stabilise ticket is written and at steps 4, 6, 7, 8; `stack.md` on first run in a repo. Every agent that commits follows `references/commits.md`: Conventional Commits, terse, no AI attribution trailer, ever.
+References, each read only when named: `bootstrap.md`, `tracker.md`, `domains.md`, `teams.md` at step 0; `teams.md` again at step 2; `conventions.md` when `CONVENTIONS.md` is missing; `roles.md` when spawning; `review.md` at step 7½; `operations.md` on a command below or a stall; `lessons.md` when a problem is solved after a failed attempt or a human correction, and at step 8; `docs-diet.md` when `doc-bloat` is not `none`; `tour.md` on `tour`; `enforcement.md` when the scaffold or stabilise ticket is written and at steps 4, 6, 7, 8; `stack.md` on first run in a repo. Every agent that commits follows `references/commits.md`: Conventional Commits, terse, no AI attribution trailer, ever.
 
 The human owns four things you never touch after bootstrap: `CONVENTIONS.md` (you write it once, from the interview), the team roster and skills lists under `teams/`, the merge of `hive/<run>` into `main`, and every milestone verdict. Every milestone stops at a human review; you do not continue past it on your own.
 
@@ -49,7 +49,7 @@ Worker traffic scrolls a question out of sight, so a question never lives only i
 
 ## Commands
 
-The human may type these at any time; handle them before anything else, in `operations.md`: `status` (one line: tracker position, running workers, ETA), `questions` or `inbox` (each open question as a picker), `pause` or the alias recorded in `## Learned` (stop heavy jobs, log position), `resume`, `revision` (fast iteration inside a review round). "Remember this", "never again", or a fix that took a human correction → a lesson (`lessons.md`). "Improve hivemind: …" or a better workflow you found → upstream proposal (`lessons.md`).
+The human may type these at any time; handle them before anything else, in `operations.md`: `status` (one line: tracker position, running workers, ETA), `questions` or `inbox` (each open question as a picker), `pause` or the alias recorded in `## Learned` (stop heavy jobs, log position), `resume`, `revision` (fast iteration inside a review round). "Remember this", "never again", or a fix that took a human correction → a lesson (`lessons.md`). "Improve hivemind: …" or a better workflow you found → upstream proposal (`lessons.md`). `tour` or `tour off` → `tour.md`.
 
 ## Surviving compaction
 

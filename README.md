@@ -33,7 +33,7 @@ Three rules hold in every domain: everything reproducible lives in git (scripts,
 - **Lessons.** Solved problems are recalled only when their trigger fires (below).
 - **Stall check.** A worker that ends its turn "waiting" instead of reporting is sent back to finish.
 - **Scratch.** Agents keep temp files, renders and worktrees in a per-ticket dir under `.git/hive/scratch/`, and anything they leave directly in `/tmp` is ledgered. Both are deleted when the ticket merges or the run closes, with a background sweep for what is left behind; nothing the hive did not create is touched.
-- **Status line.** `hive: 2 questions · 1 review` at the bottom of the terminal while anything waits on you, appended to your own status line.
+- **Status line.** `hive: 2 questions · 1 review` at the bottom of the terminal while anything waits on you, and `hivemind: update ready` when the checkout is behind, appended to your own status line.
 
 `HIVEMIND=0 claude` opens a plain session with none of them, for the review session or for working by hand.
 
@@ -208,7 +208,7 @@ node ~/hivemind/install.js --update     # from inside a hivemind repo also refre
 
 `--update` pulls the checkout (fast-forward only; it refuses a dirty or diverged checkout), then re-runs the freshly pulled installer, adding `--project` when the current repo has hivemind hooks. `--project` never overwrites your `PROFILE.md`, `ROUTING.md`, or `skills.txt`; it refreshes the link scripts, templates, `required.txt`, and the hooks. Commit the `teams/` changes.
 
-Prefer not to think about it: `node ~/hivemind/install.js --auto-update`. The session-start hook then fetches the checkout at most once a day and fast-forwards it when clean; `--no-auto-update` turns it off. Either way the lead's first line tells you when the checkout is behind.
+Prefer not to think about it: `node ~/hivemind/install.js --auto-update`. The session-start hook then fetches the checkout at most once a day and fast-forwards it when clean; `--no-auto-update` turns it off. With it off, the status line shows `hivemind: update ready` once the daily fetch finds new commits, and the lead mentions it once. `--update` lists the new `feat` and `fix` commits.
 
 ### Check the install
 
@@ -232,7 +232,7 @@ Each line is `ok`, `WARN`, or `FIX`; the exit code is 1 while a `FIX` remains. I
 
 ## First run
 
-Open `claude` in a repo where you ran `install.js --project` and hand it the ticket or the idea; the session is already the lead. Anywhere else, type `/hivemind`. Bootstrap handles `/setup-matt-pocock-skills`, `CONTEXT.md`, the conventions interview, the skills scout, and `AGENTS.md ## Learned`, then it walks you through grill → spec → tickets → contracts → dispatch → human review. Start with a small, real ticket with 2–3 independent pieces. Note tokens per merged ticket; that is your baseline for tuning the `standard|hard` routing.
+Open `claude` in a repo where you ran `install.js --project` and hand it the ticket or the idea; the session is already the lead. Anywhere else, type `/hivemind`. Bootstrap handles `/setup-matt-pocock-skills`, `CONTEXT.md`, the conventions interview, the skills scout, and `AGENTS.md ## Learned`, then it walks you through grill → spec → tickets → contracts → dispatch → human review. New to it, or just updated? Type `tour` (or `/hivemind tour`): a short interactive walkthrough, one stop at a time, questions welcome. The lead offers it on your first sessions and again after an update adds features; once you finish or type `tour off`, it costs no context until the next feature lands. Start with a small, real ticket with 2–3 independent pieces. Note tokens per merged ticket; that is your baseline for tuning the `standard|hard` routing.
 
 ## Layout
 

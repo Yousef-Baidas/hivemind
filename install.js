@@ -18,6 +18,9 @@
 //   node install.js --auto-update     let the SessionStart hook pull this checkout (off by default);
 //   node install.js --no-auto-update  both run the global install and persist the choice
 //   node install.js --doctor [--fix]  check the setup; --fix applies the safe local fixes
+//   node install.js --tour-done       record the tour as taken (the lead runs it when the tour ends
+//                                     or is skipped); the session start stops offering it until
+//                                     a new feature lands
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -168,6 +171,7 @@ function readConfig() {
 function writeConfig({ autoUpdate } = {}) {
   const c = readConfig();
   const next = { ...c, home: real(HERE), autoUpdate: autoUpdate ?? (typeof c.autoUpdate === "boolean" ? c.autoUpdate : false) };
+  if (!lstat(CONFIG)) next.toured = ""; // first install: the first-time tour; a missing key means an install from before the tour
   delete next.laya; delete next.layaOffered; // keys of a removed option
   if (JSON.stringify(next) !== JSON.stringify(c)) writeJson(CONFIG, next);
   log(`config   -> ${CONFIG} (autoUpdate ${next.autoUpdate})`);
@@ -330,6 +334,7 @@ function install(opt) {
   const root = process.cwd();
   if (opt.project && samePath(real(root), real(HERE))) die("--project sets up your repo; run it from there, not from the hivemind checkout");
   if (opt.project && samePath(real(root), real(HOME))) die("--project sets up a repo; run it from the repo root, not from your home directory");
+  const fresh = !lstat(CONFIG);
   let ok = globalInstall({ autoUpdate });
   if (opt.project) ok = projectInstall(root, opt) && ok;
   if (!teamsEnvOn()) {
@@ -339,10 +344,14 @@ function install(opt) {
   }
   log("");
   log(ok ? "Done. /hivemind bootstraps the rest." : "Done, with errors above.");
+  if (fresh) log("New to hivemind? Type /hivemind tour in any repo for a short walkthrough.");
   return ok;
 }
 
 // update
+
+// commit subjects a human would care about: features, fixes, anything marked breaking
+const CHANGE = /^(feat|fix)(\([^)]*\))?!?:|^\w+(\([^)]*\))?!:/;
 
 function update(argv) {
   const home = real(HERE);
@@ -356,11 +365,30 @@ function update(argv) {
   if (!pull.ok) die(`git pull --ff-only failed in ${home}:\n${pull.err}\nresolve it by hand (git -C "${home}" status), then re-run`);
   const after = git(["rev-parse", "HEAD"], home).out;
   log(`update   -> ${home} ${before === after ? "already up to date" : `${before.slice(0, 7)}..${after.slice(0, 7)}`}`);
+  if (before !== after) {
+    const news = git(["log", "--reverse", "--format=%s", `${before}..${after}`], home).out.split("\n").filter((l) => CHANGE.test(l));
+    for (const l of news.slice(0, 12)) log(`  ${l}`);
+    if (news.length > 12) log(`  … ${news.length - 12} more: git -C "${home}" log ${before.slice(0, 7)}..`);
+    // an install from before the tour existed gets a what's-new tour from here, not a first-time one
+    const c = readConfig();
+    const next = { ...c, ...(c.toured === undefined ? { toured: before } : {}) };
+    delete next.behind;
+    writeJson(CONFIG, next);
+  }
   // the pull may have changed this file: the new code does the install
   const rest = argv.filter((a) => a !== "--update");
   if (!rest.includes("--project") && isHiveProject(process.cwd()) && !samePath(real(process.cwd()), home)) rest.push("--project");
   const r = spawnSync(process.execPath, [path.join(HERE, "install.js"), ...rest], { stdio: "inherit" });
   process.exit(r.status ?? 1);
+}
+
+// --tour-done: the tour ran or was skipped; the autostart offers it again only after a new feature lands
+function tourDone() {
+  const head = git(["rev-parse", "HEAD"], real(HERE));
+  const next = { ...readConfig(), toured: head.ok && head.out ? head.out : "none" };
+  delete next.tourOffers;
+  writeJson(CONFIG, next);
+  log(`tour     -> done${head.ok ? ` at ${head.out.slice(0, 7)}` : ""}; "tour" in a hivemind session runs it again`);
 }
 
 // doctor
@@ -509,6 +537,7 @@ async function doctor(fix) {
 const FLAGS = {
   "--project": "project", "--install": "install", "--confine": "confine", "--update": "update",
   "--doctor": "doctor", "--fix": "fix", "--auto-update": "autoUpdate", "--no-auto-update": "noAutoUpdate",
+  "--tour-done": "tourDone",
 };
 const argv = process.argv.slice(2);
 const opt = {};
@@ -524,10 +553,12 @@ for (const a of argv) {
 if ((opt.install || opt.confine) && !opt.project) die("--install/--confine need --project", 2);
 if (opt.fix && !opt.doctor) die("--fix needs --doctor", 2);
 if (opt.doctor && Object.keys(opt).some((k) => k !== "doctor" && k !== "fix")) die("--doctor takes only --fix", 2);
+if (opt.tourDone && Object.keys(opt).length > 1) die("--tour-done takes no other flag", 2);
 if (opt.autoUpdate && opt.noAutoUpdate) die("--auto-update and --no-auto-update conflict", 2);
 
 (async () => {
   if (opt.doctor) process.exitCode = (await doctor(opt.fix)) ? 0 : 1;
+  else if (opt.tourDone) tourDone();
   else if (opt.update) update(argv);
   else process.exitCode = install(opt) ? 0 : 1;
 })().catch((e) => die(`error: ${e.message}`));

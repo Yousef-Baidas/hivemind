@@ -3,7 +3,8 @@
 // as if the human had typed /hivemind. Prints the skill body plus a local state line
 // so the lead knows what bootstrap can skip without spending a tool call.
 // Also: syncs agents and hooks from the hivemind checkout named in ~/.claude/hivemind.json,
-// checks it for updates (background fetch at most daily, fast-forward to it when autoUpdate), and after
+// checks it for updates (background fetch at most daily, fast-forward to it when autoUpdate; the
+// behind-count feeds the status line), offers the tour while it is pending (tour=…), and after
 // a compaction (or a startup with an open run) re-injects the run-log tail and, after a
 // compaction, the human's last ten messages from the journal. Starts the scratch safety sweep
 // (hive-scratch.js --sweep --stale) detached, so it never slows the start.
@@ -36,9 +37,11 @@ lib.run((ev) => {
     safe(() => sync(home, root, notes));
   }
   const runs = hiveBranches(root);
-  const state = localState(root, runs, home, behind) + " " + safe(() => inboxState(root), "inbox=unknown");
-  safe(() => scratchSweep(root));
   const src = ev.source;
+  const tour = home && (src === "startup" || src === "clear") ? safe(() => tourState(home, cfg), "") : "";
+  const state = localState(root, runs, home, behind) + " " + safe(() => inboxState(root), "inbox=unknown");
+  if (tour) notes.push(tourOffer(tour));
+  safe(() => scratchSweep(root));
 
   if (src === "resume" || src === "fork") {
     // a resumed session still has the skill in its transcript; only the state line is new
@@ -69,8 +72,10 @@ lib.run((ev) => {
 
 function safe(fn, dflt) { try { return fn(); } catch { return dflt; } }
 
-// background fetch at most once a day; behind-count from the already-fetched upstream ref
+// background fetch at most once a day; behind-count from the already-fetched upstream ref.
+// The count goes to hivemind.json for the status line, so an update shows even with autoUpdate off.
 function update(home, cfg, notes) {
+  const patch = {};
   const last = typeof cfg.lastFetch === "number" ? cfg.lastFetch : Date.parse(cfg.lastFetch) || 0;
   if (Date.now() - last > 24 * 3600e3) {
     try {
@@ -78,18 +83,60 @@ function update(home, cfg, notes) {
       c.on("error", () => {});
       c.unref();
     } catch {}
-    safe(() => lib.writeJSON(lib.configFile(), { ...cfg, lastFetch: Date.now() }));
+    patch.lastFetch = Date.now();
   }
-  const behind = parseInt(lib.git(["-C", home, "rev-list", "--count", "HEAD..@{u}"], home), 10) || 0;
-  if (!behind || cfg.autoUpdate !== true) return behind;
-  try {
-    const dirty = execFileSync("git", ["-C", home, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8", timeout: 3000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-    if (dirty.trim()) return behind;
-    // fast-forward to the already-fetched upstream: no network wait, no race with the background fetch
-    execFileSync("git", ["-C", home, "merge", "--ff-only", "--quiet", "@{u}"], { timeout: 15000, windowsHide: true, stdio: "ignore" });
-    notes.push(`hivemind: updated to ${lib.git(["-C", home, "rev-parse", "--short", "HEAD"], home)}`);
-    return 0;
-  } catch { return behind; }
+  let behind = parseInt(lib.git(["-C", home, "rev-list", "--count", "HEAD..@{u}"], home), 10) || 0;
+  if (behind && cfg.autoUpdate === true) {
+    try {
+      const dirty = execFileSync("git", ["-C", home, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8", timeout: 3000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      if (!dirty.trim()) {
+        const before = lib.git(["-C", home, "rev-parse", "HEAD"], home);
+        // fast-forward to the already-fetched upstream: no network wait, no race with the background fetch
+        execFileSync("git", ["-C", home, "merge", "--ff-only", "--quiet", "@{u}"], { timeout: 15000, windowsHide: true, stdio: "ignore" });
+        notes.push(`hivemind: updated to ${lib.git(["-C", home, "rev-parse", "--short", "HEAD"], home)}`);
+        behind = 0;
+        // an install from before the tour existed gets a what's-new tour from here, not a first-time one
+        if (cfg.toured === undefined && before) patch.toured = before;
+      }
+    } catch {}
+  }
+  if ((cfg.behind || 0) !== behind) patch.behind = behind;
+  if (Object.keys(patch).length) patchConfig(cfg, patch);
+  return behind;
+}
+
+function patchConfig(cfg, patch) {
+  safe(() => {
+    const next = { ...lib.hivemindConfig(), ...patch };
+    for (const k of Object.keys(next)) if (next[k] === undefined || (k === "behind" && !next[k])) delete next[k];
+    lib.writeJSON(lib.configFile(), next);
+  });
+  Object.assign(cfg, patch);
+}
+
+// printed only while the tour is pending, so a toured install carries none of it
+function tourOffer(tour) {
+  const n = tour.split(":")[1];
+  const line = n ? `hivemind has ${n} new feature${n === "1" ? "" : "s"} since your last tour: type \`tour\`, or \`tour off\`.` : "New to hivemind? Type `tour` for a short walkthrough, or `tour off`.";
+  return `hivemind ${tour}: open your first reply with this one line, then carry on: "${line}" (the hook repeats the offer, you do not; \`tour\` → references/tour.md).`;
+}
+
+// the tour offer: tour=new until the first tour, tour=whats-new:N once N features landed since the
+// last one. At most three session starts, then recorded as declined; nothing at all once taken.
+const FEATURE = /^feat(\([^)]*\))?!?:|^\w+(\([^)]*\))?!:/;
+function tourState(home, cfg) {
+  let field = "tour=new";
+  const head = lib.git(["-C", home, "rev-parse", "HEAD"], home);
+  if (cfg.toured) {
+    if (!head || head === cfg.toured) return "";
+    const n = lib.git(["-C", home, "log", "--format=%s", `${cfg.toured}..HEAD`], home).split("\n").filter((l) => FEATURE.test(l)).length;
+    if (!n) return "";
+    field = `tour=whats-new:${n}`;
+  }
+  const offers = (cfg.tourOffers || 0) + 1;
+  if (offers > 3) { patchConfig(cfg, { toured: head || "none", tourOffers: undefined }); return ""; }
+  patchConfig(cfg, { tourOffers: offers });
+  return field;
 }
 
 // agents → ~/.claude/agents, hooks → <repo>/.claude/hooks, only when bytes differ; never deletes

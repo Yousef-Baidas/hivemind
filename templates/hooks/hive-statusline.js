@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Claude Code statusLine command: the user's own status line (from ~/.claude/settings.json,
-// run with the same stdin), then " · hive: N questions · M reviews" when either is above 0.
+// run with the same stdin), then " · hive: N questions · M reviews" when either is above 0, and
+// " · hivemind: update ready" when the autostart found the hivemind checkout behind.
 // Reads only the inbox cache; a cache older than 60 s triggers one detached
 // `hive-inbox.js --refresh` per 60 s (lock: <common>/hive/inbox.refresh). Never throws.
 "use strict";
@@ -39,6 +40,12 @@ try {
     const r = inbox ? inbox.reviews.length : 0;
     if (q || r) out += `${out ? " · " : ""}hive: ${q} question${q === 1 ? "" : "s"} · ${r} review${r === 1 ? "" : "s"}`;
   }
+} catch {}
+
+// the hivemind checkout is behind its upstream (counted by the autostart); shown until --update
+try {
+  const b = (JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "hivemind.json"), "utf8")) || {}).behind;
+  if (b > 0) out += `${out ? " · " : ""}hivemind: update ready (install.js --update)`;
 } catch {}
 
 process.stdout.write(out + "\n");
