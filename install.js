@@ -40,7 +40,7 @@ const os = require("os");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 const L = require(path.join(__dirname, "templates", "teams", "link-skills.js"));
-const { WIN, lstat, real, isDir, isFile, samePath, removeLink, linkDir } = L;
+const { WIN, lstat, real, isDir, isFile, samePath, linkDir } = L;
 
 const HERE = __dirname;
 // the shipped roster; teams/ in any repo, this checkout included, is that repo's own
@@ -96,6 +96,53 @@ const norm = (s) => s.replace(/\r\n/g, "\n");
 const readText = (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } };
 const inside = (child, parent) => { const r = path.relative(parent, child); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
 
+// deletes (#13): every one goes through safeRemove, limited to allowedRoots
+// realpath of the deepest existing ancestor, the rest joined on: a path that does not exist yet resolves too
+const realish = (p) => { const a = path.resolve(p), r = real(a); if (r) return r; const d = path.dirname(a); return d === a ? a : path.join(realish(d), path.basename(a)); };
+const userHome = () => { try { return realish(os.userInfo().homedir); } catch { return null; } };
+
+// the target's Proteus-owned paths and the project's git toplevel; a toplevel holding a home would open all of it
+function allowedRoots(home, codexHome, projectTop) {
+  const h = realish(home), u = userHome();
+  const roots = [[".claude", "skills"], [".claude", "agents"], [".agents", "skills"], [".claude", "proteus.json"], [".claude", "hivemind.json"]].map((p) => realish(path.join(h, ...p)));
+  roots.push(realish(path.join(codexHome, "agents")));
+  const top = projectTop ? realish(projectTop) : null;
+  if (top && !inside(h, top) && !(u && inside(u, top))) roots.push(top);
+  return roots;
+}
+
+// true if p was removed; false if absent or refused (outside roots, a root dir itself, or in the user's
+// real home while HOME is elsewhere); never throws
+function safeRemove(p, roots) {
+  try {
+    const st = lstat(p);
+    if (!st) return false;
+    const r = path.join(realish(path.dirname(path.resolve(p))), path.basename(p)), u = userHome();
+    if ((u && inside(r, u) && !inside(realish(HOME), u)) || !roots.some((x) => (samePath(x, r) ? !isDir(x) : inside(r, x)))) {
+      warn(`refused  ${p} (outside what Proteus owns for HOME=${HOME}; left alone)`);
+      return false;
+    }
+    if (!st.isSymbolicLink()) fs.rmSync(p, { recursive: true, force: true });
+    else {
+      // a link, never what it points to; a junction needs rmdir, which refuses a real directory
+      try { fs.unlinkSync(p); } catch (e) { if (e.code !== "EPERM" && e.code !== "EISDIR") throw e; fs.rmdirSync(p); }
+    }
+    return true;
+  } catch (e) {
+    warn(`warning: ${p} not removed: ${e.message}`);
+    return false;
+  }
+}
+
+// the git toplevel of the repo being set up, set by withProject; null outside one
+let PROJECT = null;
+const ownedRoots = () => allowedRoots(HOME, CODEX_HOME, PROJECT);
+function withProject(dir, fn) {
+  const was = PROJECT, top = git(["rev-parse", "--show-toplevel"], dir);
+  PROJECT = top.ok && top.out ? top.out : null;
+  try { return fn(); } finally { PROJECT = was; }
+}
+
 // {} when missing or empty, null when not a JSON object
 function readJson(file) {
   const t = readText(file);
@@ -121,7 +168,7 @@ function frontmatterName(dir) {
 function copyFile(src, dest) {
   const st = lstat(dest);
   if (st && !st.isSymbolicLink() && fs.readFileSync(src).equals(fs.readFileSync(dest))) return;
-  if (st && st.isSymbolicLink()) removeLink(dest);
+  if (st && st.isSymbolicLink() && !safeRemove(dest, ownedRoots())) return;
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
 }
@@ -164,9 +211,9 @@ function linkSkills(dir = path.join(CLAUDE, "skills")) {
         ok = false;
         continue;
       }
-      fs.rmSync(link, { recursive: true, force: true });
+      if (!safeRemove(link, ownedRoots())) { ok = false; continue; }
       log(`removed  ${link} (old copy, replaced by a link)`);
-    }
+    } else if (st && !samePath(real(link), target) && !safeRemove(link, ownedRoots())) { ok = false; continue; }
     linkDir(target, link);
   }
   if (ok) log(`skills   -> ${path.join(dir, "{proteus,proteus-review}")} linked to ${path.join(real(HERE), "skills")}`);
@@ -241,7 +288,7 @@ function copyCodexAgents() {
   const { dir, stale, kept } = codexAgentState();
   for (const a of stale) {
     const p = path.join(dir, a.name);
-    if (lstat(p) && lstat(p).isSymbolicLink()) removeLink(p);
+    if (lstat(p) && lstat(p).isSymbolicLink() && !safeRemove(p, ownedRoots())) continue;
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(p, a.text);
   }
@@ -321,7 +368,7 @@ function installContextMode() {
 // project
 
 // Copies of the skill, and unmodified copies of shipped agents, in <dir>/.claude.
-// Returns { dupes: [path], overrides: [path] }; act removes the dupes.
+// Returns { dupes: [path], overrides: [path] }; act removes the dupes, and dupes lists only those removed.
 function projectDupes(dir, act) {
   const dupes = [], overrides = [];
   if (samePath(real(dir), real(HOME))) return { dupes, overrides }; // ~/.claude is the global install
@@ -329,16 +376,14 @@ function projectDupes(dir, act) {
     const p = path.join(dir, codex() ? ".agents" : ".claude", "skills", s);
     const st = lstat(p);
     if (!st) continue;
-    if (st.isSymbolicLink()) { dupes.push(p); if (act) removeLink(p); }
-    else if (st.isDirectory() && frontmatterName(p) === s && !inside(HERE, p)) { dupes.push(p); if (act) fs.rmSync(p, { recursive: true, force: true }); }
+    if (st.isSymbolicLink() || (st.isDirectory() && frontmatterName(p) === s && !inside(HERE, p))) { if (!act || safeRemove(p, ownedRoots())) dupes.push(p); }
   }
   for (const f of codex() ? [] : shippedAgents()) {
     const p = path.join(dir, ".claude", "agents", f);
     const t = readText(p);
     if (t === null) continue;
     if (norm(t) === norm(fs.readFileSync(path.join(HERE, "agents", f), "utf8")) || pastShipped(`agents/${f}`, t)) {
-      dupes.push(p);
-      if (act) { if (lstat(p).isSymbolicLink()) removeLink(p); else fs.unlinkSync(p); }
+      if (!act || safeRemove(p, ownedRoots())) dupes.push(p);
     } else overrides.push(p);
   }
   return { dupes, overrides };
@@ -425,8 +470,7 @@ function copyTeams(root) {
   const stale = path.join(teams, "templates", "hooks", "settings.local.json");
   const t = readText(stale);
   if (t !== null && !isFile(path.join(HERE, "templates", "hooks", "settings.local.json"))
-      && crypto.createHash("sha256").update(norm(t)).digest("hex") === OLD_WORKER_SETTINGS) {
-    fs.unlinkSync(stale);
+      && crypto.createHash("sha256").update(norm(t)).digest("hex") === OLD_WORKER_SETTINGS && safeRemove(stale, ownedRoots())) {
     log("removed  teams/templates/hooks/settings.local.json (renamed to worktree-settings.local.json)");
   }
   // the routing table is the repo's once copied, like PROFILE.md
@@ -478,7 +522,6 @@ function withHarness(h, fn) {
   HARNESS = h;
   try { return fn(); } finally { HARNESS = was; }
 }
-const rmPath = (p) => { const st = lstat(p); if (!st) return; if (st.isSymbolicLink()) removeLink(p); else fs.rmSync(p, { recursive: true, force: true }); };
 // a skill dir that is a link, or a copy an old installer made, never a real dir of the user's
 const oldSkillCopy = (p, name) => { const st = lstat(p); return !!st && (st.isSymbolicLink() || (st.isDirectory() && frontmatterName(p) === name && !inside(HERE, p))); };
 const listDir = (d, re) => (isDir(d) ? fs.readdirSync(d).filter((f) => re.test(f)).sort() : []);
@@ -490,8 +533,7 @@ function migrateConfig() {
   const old = readJson(OLD_CONFIG), cur = readJson(CONFIG);
   if (!old || !cur) { warn(`warning: ${old ? CONFIG : OLD_CONFIG} is not valid JSON; ${OLD_CONFIG} left in place, merge it into ${CONFIG} by hand`); return null; }
   writeJson(CONFIG, { ...old, ...cur });
-  fs.unlinkSync(OLD_CONFIG);
-  log(`config   -> ${OLD_CONFIG} merged into ${CONFIG} and removed`);
+  log(`config   -> ${OLD_CONFIG} merged into ${CONFIG}${safeRemove(OLD_CONFIG, ownedRoots()) ? " and removed" : "; left in place"}`);
   if (typeof old.home === "string" && !samePath(real(old.home) || old.home, real(HERE))) log(`note     : ${old.home} (the hivemind checkout) is no longer used; delete it when you like`);
   return old;
 }
@@ -500,7 +542,7 @@ function migrateConfig() {
 // Returns { found, kept, harnesses }; act removes found.
 function oldGlobal(act) {
   const found = [], kept = [], harnesses = new Set();
-  const drop = (p, h) => { found.push(p); harnesses.add(h); if (act) rmPath(p); };
+  const drop = (p, h) => { if (act && !safeRemove(p, ownedRoots())) kept.push(`${p} (refused: outside what Proteus owns)`); else { found.push(p); harnesses.add(h); } };
   for (const [h, dir] of [["claude", path.join(CLAUDE, "skills")], ["codex", AGENTS_SKILLS]]) {
     for (const s of OLD_SKILLS) {
       const p = path.join(dir, s);
@@ -547,7 +589,7 @@ const renameExclude = (l) => l.replace("hivemind", "proteus").replace(/hive-(?=\
 function migrateProject(root, act) {
   const found = [], kept = [], harnesses = new Set();
   const rel = (p) => path.relative(root, p).split(path.sep).join("/");
-  const drop = (p, h) => { found.push(rel(p)); if (h) harnesses.add(h); if (act) rmPath(p); };
+  const drop = (p, h) => { if (act && !safeRemove(p, ownedRoots())) kept.push(`${rel(p)} (refused: outside what Proteus owns)`); else { found.push(rel(p)); if (h) harnesses.add(h); } };
   const tracked = new Set(git(["ls-files", "--", ".claude/hooks", ".codex/hooks"], root).out.split("\n").filter(Boolean));
   for (const h of HARNESSES) {
     const dir = path.join(root, `.${h}`, "hooks");
@@ -631,12 +673,14 @@ function migrateProject(root, act) {
 // a repo from hivemind to Proteus: its old pieces out, then the project install for each CLI
 // in base or set up by hivemind there
 function migrateRepo(root, opt = {}, base = []) {
-  const m = migrateProject(root, true);
-  for (const p of m.found) log(`removed  ${p} (hivemind's)`);
-  for (const p of m.kept) log(`kept     ${p}`);
-  let ok = true;
-  for (const h of new Set([...base, ...m.harnesses])) ok = withHarness(h, () => projectInstall(root, { ...opt, confine: opt.confine && h === "claude" })) && ok;
-  return ok;
+  return withProject(root, () => {
+    const m = migrateProject(root, true);
+    for (const p of m.found) log(`removed  ${p} (hivemind's)`);
+    for (const p of m.kept) log(`kept     ${p}`);
+    let ok = true;
+    for (const h of new Set([...base, ...m.harnesses])) ok = withHarness(h, () => projectInstall(root, { ...opt, confine: opt.confine && h === "claude" })) && ok;
+    return ok;
+  });
 }
 
 // repos under SCAN (3 levels down) whose lead hooks are still hivemind's
@@ -869,17 +913,18 @@ async function doctor(fix) {
     return a && a.commit === "" && a.pr === "" ? ["ok", "attribution off"] : ["FIX", "attribution not disabled", self];
   }, () => setAttribution());
 
-  // skill copies in this dir or a parent (below $HOME) show /proteus twice
-  const dirs = [];
-  for (let d = root; ; d = path.dirname(d)) {
-    if (samePath(real(d), real(HOME))) break;
+  // skill copies in this dir or a parent up to the repo's toplevel (this dir alone outside a repo) show
+  // /proteus twice; never a home: ~/.claude is the global install (#13)
+  const dirs = [], stop = top.ok ? real(top.out) || top.out : null, homes = [real(HOME), userHome()];
+  for (let d = real(root) || root; ; d = path.dirname(d)) {
+    if (homes.some((h) => samePath(real(d), h))) break;
     dirs.push(d);
-    if (path.dirname(d) === d) break;
+    if (!stop || samePath(d, stop) || path.dirname(d) === d) break;
   }
   check(() => {
     const dupes = dirs.flatMap((d) => projectDupes(d, false).dupes);
     return dupes.length ? ["FIX", `duplicate copies: ${dupes.join(", ")}`, `${self} --doctor --fix`] : ["ok", "no duplicate skill or agent copies"];
-  }, () => dirs.forEach((d) => projectDupes(d, true)));
+  }, () => withProject(root, () => dirs.forEach((d) => projectDupes(d, true))));
   if (!cxh) check(() => {
     const kept = dirs.flatMap((d) => projectDupes(d, false).overrides);
     return kept.length ? ["WARN", `local agent overrides: ${kept.join(", ")}`, "delete them to use the shipped ones"] : ["ok", "no local agent overrides"];

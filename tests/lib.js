@@ -1,5 +1,6 @@
 // Shared harness for tests/*.test.js: assertions, a per-file temp dir, fake gh, spawn helpers.
 // summary() prints "N passed, M failed" and sets exit code 1 if any assertion failed, else 0.
+// workdir() exits 1 with a message, before writing anything, when os.tmpdir() is in the user's home or a git worktree.
 "use strict";
 const fs = require("fs");
 const os = require("os");
@@ -13,7 +14,24 @@ function need() {
   if (!W) throw new Error("call workdir(name) first");
 }
 
+// a tmpdir in the real home or in a git worktree puts the installer's walks next to real files (#13): stop before any write
+function refuseTmpdir() {
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const inside = (child, parent) => { const r = path.relative(parent, child); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
+  const tmp = real(os.tmpdir());
+  let why = null;
+  try { if (inside(tmp, real(os.userInfo().homedir))) why = `inside your home ${os.userInfo().homedir}`; } catch {}
+  for (let d = tmp; !why; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, ".git"))) why = `inside the git worktree ${d}`;
+    if (path.dirname(d) === d) break;
+  }
+  if (!why) return;
+  console.error(`refusing to run: os.tmpdir() ${os.tmpdir()} is ${why}; run with TMPDIR outside it (the default /tmp)`);
+  process.exit(1);
+}
+
 function workdir(name) {
+  refuseTmpdir();
   W = path.join(os.tmpdir(), "proteus-test", name);
   fs.rmSync(W, { recursive: true, force: true });
   fs.mkdirSync(W, { recursive: true });
