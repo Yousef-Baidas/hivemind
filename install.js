@@ -17,8 +17,6 @@
 //                                     current repo too if it is a hivemind project
 //   node install.js --auto-update     let the SessionStart hook pull this checkout (off by default);
 //   node install.js --no-auto-update  both run the global install and persist the choice
-//   node install.js --laya <url|off>  point lesson recall at a local laya classifier, or decline it
-//   node install.js --laya setup      print the laya install steps for this machine (GPU only; runs nothing)
 //   node install.js --doctor [--fix]  check the setup; --fix applies the safe local fixes
 "use strict";
 const fs = require("fs");
@@ -159,27 +157,20 @@ function setAttribution() {
   return true;
 }
 
-// ~/.claude/hivemind.json: { home, autoUpdate, laya?, layaOffered?, ...keys the hooks own }
+// ~/.claude/hivemind.json: { home, autoUpdate, ...keys the hooks own }
 const CONFIG = path.join(CLAUDE, "hivemind.json");
 function readConfig() {
   const c = readJson(CONFIG);
   if (!c) warn(`warning: ${CONFIG} was not valid JSON; rewritten`);
   return c || {};
 }
-function patchConfig(patch) {
-  const c = readConfig();
-  const next = { ...c, ...patch };
-  if (JSON.stringify(next) !== JSON.stringify(c)) writeJson(CONFIG, next);
-  return next;
-}
 
-function writeConfig({ autoUpdate, laya } = {}) {
+function writeConfig({ autoUpdate } = {}) {
   const c = readConfig();
-  const patch = { home: real(HERE), autoUpdate: autoUpdate ?? (typeof c.autoUpdate === "boolean" ? c.autoUpdate : false) };
-  if (laya !== undefined) patch.laya = laya;
-  const next = patchConfig(patch);
-  const l = next.laya === "off" ? ", laya off" : next.laya && next.laya.url ? `, laya ${next.laya.url}` : "";
-  log(`config   -> ${CONFIG} (autoUpdate ${next.autoUpdate}${l})`);
+  const next = { ...c, home: real(HERE), autoUpdate: autoUpdate ?? (typeof c.autoUpdate === "boolean" ? c.autoUpdate : false) };
+  delete next.laya; delete next.layaOffered; // keys of a removed option
+  if (JSON.stringify(next) !== JSON.stringify(c)) writeJson(CONFIG, next);
+  log(`config   -> ${CONFIG} (autoUpdate ${next.autoUpdate})`);
 }
 
 function globalInstall(config) {
@@ -225,61 +216,6 @@ function installContextMode() {
   warn(`warning: the required context-mode plugin is not ${after.installed ? "enabled" : "installed"}. Run:`);
   for (const args of steps) warn(`  claude ${args.join(" ")}`);
   return false;
-}
-
-// laya is offered only with a GPU: NVIDIA with >= 6 GB VRAM, or Apple Silicon. Any doubt is no GPU.
-function gpu() {
-  if (process.platform === "darwin" && process.arch === "arm64") return "Apple Silicon";
-  const r = spawnSync("nvidia-smi", ["--query-gpu=name,memory.total", "--format=csv,noheader"], { encoding: "utf8", shell: WIN, timeout: 5000 });
-  if (r.status !== 0 || typeof r.stdout !== "string") return null;
-  for (const line of r.stdout.split(/\r?\n/)) {
-    const m = /^(.+?),\s*(\d+)\s*MiB\s*$/.exec(line.trim());
-    if (m && Number(m[2]) >= 6 * 1024) return `${m[1]} ${(Number(m[2]) / 1024).toFixed(1)} GB`;
-  }
-  return null;
-}
-
-// printed, never run: the human runs them (a ~3 GB download on NVIDIA)
-function layaSetup() {
-  const g = gpu();
-  const venv = "~/.local/share/laya/venv";
-  const on = `node "${path.join(HERE, "install.js")}" --laya http://127.0.0.1:47311`;
-  if (WIN) {
-    log(`laya on Windows: follow https://github.com/NandhaKishorM/laya#readme with LAYA_HOST=127.0.0.1 LAYA_PORT=47311${g ? "" : " (no NVIDIA GPU with 6 GB+ found: not recommended)"}, then:`);
-    log(`  ${on}`);
-    return true;
-  }
-  if (g === "Apple Silicon") {
-    log("laya on Apple Silicon (untested; the numbers in the README are from an NVIDIA card):");
-    for (const c of [`python3 -m venv ${venv}`, `${venv}/bin/pip install --only-binary=:all: torch==2.14.0 "laya[serve]==0.3.21"`,
-      `env LAYA_HOST=127.0.0.1 LAYA_PORT=47311 LAYA_DEVICE=mps LAYA_MODELS=multilingual LAYA_PRELOAD=1 LAYA_MAX_LOADED=1 LAYA_MAX_TOKEN_BUDGET=1024 ${venv}/bin/laya-serve`, on]) log(`  ${c}`);
-    return true;
-  }
-  if (!g || process.platform !== "linux") {
-    warn(`laya setup covers Linux with an NVIDIA GPU (6 GB+ VRAM) and Apple Silicon; ${g ? process.platform : "no such GPU found"}. On a CPU it is heavy and not recommended (README "Optional: laya").`);
-    return false;
-  }
-  const unit = path.join(HERE, "templates", "laya", "laya.service");
-  log(`laya on ${g}: run these yourself (~3 GB download, ~5.5 GB on disk; hivemind never runs them):`);
-  for (const c of [`python3 -m venv ${venv}`,
-    `${venv}/bin/pip install --only-binary=:all: --index-url https://download.pytorch.org/whl/cu132 torch==2.14.0+cu132`,
-    `${venv}/bin/pip install --only-binary=:all: "laya[serve]==0.3.21"`,
-    "mkdir -p ~/.config/systemd/user", `cp "${unit}" ~/.config/systemd/user/laya.service`,
-    "systemctl --user enable --now laya", on]) log(`  ${c}`);
-  log("");
-  log(`The unit (${unit}):`);
-  log(fs.readFileSync(unit, "utf8").trimEnd().split("\n").map((l) => `  ${l}`).join("\n"));
-  return true;
-}
-
-// "off", or { url, threshold } for an http(s) URL; null when invalid
-function parseLaya(v) {
-  if (v === "off") return "off";
-  try {
-    const u = new URL(v);
-    if (u.protocol === "http:" || u.protocol === "https:") return { url: v.replace(/\/+$/, ""), threshold: 0.8 };
-  } catch {}
-  return null;
 }
 
 // project
@@ -391,12 +327,10 @@ function projectInstall(root, opt) {
 function install(opt) {
   if (!nodeOk()) die(`node ${process.versions.node} is older than ${NODE_MIN}, which the required context-mode plugin needs. Upgrade: ${nodeFix()}, then re-run`);
   const autoUpdate = opt.autoUpdate ? true : opt.noAutoUpdate ? false : undefined;
-  const laya = opt.laya === undefined ? undefined : parseLaya(opt.laya);
-  if (laya === null) die(`--laya takes an http(s) URL or "off", not: ${opt.laya}`, 2);
   const root = process.cwd();
   if (opt.project && samePath(real(root), real(HERE))) die("--project sets up your repo; run it from there, not from the hivemind checkout");
   if (opt.project && samePath(real(root), real(HOME))) die("--project sets up a repo; run it from the repo root, not from your home directory");
-  let ok = globalInstall({ autoUpdate, laya });
+  let ok = globalInstall({ autoUpdate });
   if (opt.project) ok = projectInstall(root, opt) && ok;
   if (!teamsEnvOn()) {
     log("");
@@ -405,17 +339,6 @@ function install(opt) {
   }
   log("");
   log(ok ? "Done. /hivemind bootstraps the rest." : "Done, with errors above.");
-  const c = readConfig();
-  // offered once, and only with a GPU; without one it is marked offered silently
-  if (c.laya === undefined && c.layaOffered !== true) {
-    const self = `node "${path.join(HERE, "install.js")}"`;
-    const g = gpu();
-    if (g) {
-      log("");
-      log(`optional: laya (local classifier on your ${g}, ~1.5 GB VRAM; README "Optional: laya") can improve lesson recall. Steps: ${self} --laya setup · decline: ${self} --laya off. This is shown once.`);
-    }
-    patchConfig({ layaOffered: true });
-  }
   return ok;
 }
 
@@ -504,19 +427,6 @@ async function doctor(fix) {
     return c && samePath(c.home, real(HERE)) ? ["ok", `hivemind.json home, autoUpdate ${c.autoUpdate === true}`]
       : ["FIX", "~/.claude/hivemind.json missing or points elsewhere", self];
   }, () => writeConfig());
-  // laya is optional: reported only once enabled, and never counted as something to fix
-  const laya = (readJson(CONFIG) || {}).laya;
-  if (laya && laya.url) {
-    check(async () => {
-      try {
-        await fetch(laya.url + "/", { signal: AbortSignal.timeout(500) });
-        return ["ok", `laya answers at ${laya.url}`];
-      } catch {
-        return ["WARN", `laya not answering at ${laya.url}`, `start it, or ${self} --laya off`];
-      }
-    });
-    check(() => gpu() ? ["ok", "laya has a GPU"] : ["WARN", "laya on CPU: heavy (no NVIDIA GPU with 6 GB+ or Apple Silicon found)", `${self} --laya off`]);
-  }
   check(() => {
     const s = readJson(path.join(CLAUDE, "settings.json"));
     const a = s && s.attribution;
@@ -602,13 +512,7 @@ const FLAGS = {
 };
 const argv = process.argv.slice(2);
 const opt = {};
-for (let i = 0; i < argv.length; i++) {
-  const a = argv[i];
-  if (a === "--laya" || a.startsWith("--laya=")) {
-    opt.laya = a === "--laya" ? argv[++i] : a.slice("--laya=".length);
-    if (!opt.laya || (opt.laya !== "setup" && !parseLaya(opt.laya))) die(`--laya takes an http(s) URL, "off" or "setup", not: ${opt.laya ?? "nothing"}`, 2);
-    continue;
-  }
+for (const a of argv) {
   if (a === "-h" || a === "--help") {
     const lines = fs.readFileSync(__filename, "utf8").split(/\r?\n/).slice(1);
     console.log(lines.slice(0, lines.findIndex((l) => !l.startsWith("//"))).map((l) => l.slice(3)).join("\n"));
@@ -621,11 +525,9 @@ if ((opt.install || opt.confine) && !opt.project) die("--install/--confine need 
 if (opt.fix && !opt.doctor) die("--fix needs --doctor", 2);
 if (opt.doctor && Object.keys(opt).some((k) => k !== "doctor" && k !== "fix")) die("--doctor takes only --fix", 2);
 if (opt.autoUpdate && opt.noAutoUpdate) die("--auto-update and --no-auto-update conflict", 2);
-if (opt.laya === "setup" && Object.keys(opt).length > 1) die("--laya setup takes no other flags", 2);
 
 (async () => {
   if (opt.doctor) process.exitCode = (await doctor(opt.fix)) ? 0 : 1;
-  else if (opt.laya === "setup") process.exitCode = layaSetup() ? 0 : 1;
   else if (opt.update) update(argv);
   else process.exitCode = install(opt) ? 0 : 1;
 })().catch((e) => die(`error: ${e.message}`));

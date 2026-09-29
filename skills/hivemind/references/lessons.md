@@ -32,8 +32,6 @@ Why: the GUI falls back to the active view; background mode does not.
 
 `hive-lessons.js` runs on Bash, file access, and human messages, in the lead and in every worker worktree. On a trigger match it injects the lesson once per session, two at most per event, and counts the hit in `.git/hive/lesson-hits.json`. Workers get lessons without the lead passing them.
 
-Optional: if the human enabled laya (`install.js --laya <url>`), a failing Bash call also asks the local classifier which lessons match the error text, for failures the regex missed. It only adds lessons, never replaces a regex match, and falls back to regex alone on any error. Its scores are uncalibrated: at milestone close, compare the `via: "laya"` hits in `lesson-hits.json` with the lessons that actually applied, and propose a new `threshold` to the human if the default 0.8 misfires. Never suggest laya itself; the installer offers it once, on GPU machines only.
-
 ## At step 8 (close)
 
 One subagent reads `lesson-hits.json` and `docs/lessons/` and reports one line per lesson: hits this run, last hit. Then:

@@ -9,13 +9,11 @@
 #   ... -Project -Install -Confine fetch missing skills, hide them from the lead
 #   ... -Update                    git pull this checkout, reinstall, refresh the current repo
 #   ... -AutoUpdate                let sessions pull this checkout (-NoAutoUpdate: stop)
-#   ... -Laya <url|off|setup>      point lesson recall at a local laya classifier, decline it,
-#                                  or print its GPU setup steps (runs nothing)
 #   ... -Doctor [-Fix]             check the setup; -Fix applies the safe local fixes
 #
 # Or skip PowerShell entirely: node C:\path\to\hivemind\install.js --project
 param([switch]$Project, [switch]$Install, [switch]$Confine, [switch]$Update,
-      [switch]$Doctor, [switch]$Fix, [switch]$AutoUpdate, [switch]$NoAutoUpdate, [string]$Laya)
+      [switch]$Doctor, [switch]$Fix, [switch]$AutoUpdate, [switch]$NoAutoUpdate)
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Write-Host "node not found; install Node 22.5+, open a new terminal, and re-run:"
@@ -31,6 +29,5 @@ if ($Doctor)       { $flags += "--doctor" }
 if ($Fix)          { $flags += "--fix" }
 if ($AutoUpdate)   { $flags += "--auto-update" }
 if ($NoAutoUpdate) { $flags += "--no-auto-update" }
-if ($Laya)         { $flags += "--laya"; $flags += $Laya }
 & node (Join-Path $PSScriptRoot "install.js") @flags
 exit $LASTEXITCODE

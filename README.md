@@ -185,7 +185,7 @@ On Windows, PowerShell blocks unsigned scripts by default. Run the wrapper as:
 powershell -ExecutionPolicy Bypass -File C:\path\to\hivemind\install.ps1 -Project
 ```
 
-or skip PowerShell: `node C:\path\to\hivemind\install.js --project`. The switches are `-Project -Install -Confine -Update -AutoUpdate -NoAutoUpdate -Laya <url|off|setup> -Doctor -Fix`.
+or skip PowerShell: `node C:\path\to\hivemind\install.js --project`. The switches are `-Project -Install -Confine -Update -AutoUpdate -NoAutoUpdate -Doctor -Fix`.
 
 Agent teams must be on. `--doctor` prints the exact line for your shell; for reference:
 
@@ -218,14 +218,6 @@ node ~/hivemind/install.js --doctor --fix   # repair links, duplicates, context-
 ```
 
 Each line is `ok`, `WARN`, or `FIX`; the exit code is 1 while a `FIX` remains. It checks Node 22.5+, the context-mode plugin (installed and enabled), the skill links and duplicates, agents, attribution, agent teams, `gh` auth, the project hooks, `ROUTING.md`, and that every listed team skill resolves.
-
-### Optional: laya
-
-[laya](https://github.com/NandhaKishorM/laya) is a local classifier that lets lesson recall catch failures the regex triggers miss. It is used for lesson recall only, and only on machines with a GPU (NVIDIA with 6 GB+ VRAM, or Apple Silicon). There the first global install prints one line offering it. CPU-only machines never see the offer, and laya is not recommended on them: on a CPU it needs 3-4 GB of RAM and about 0.6 s per question. `--laya off` declines; either way you are never asked again. hivemind works the same without laya, never starts it, and falls back to the regex silently when it is not answering.
-
-Measured on an RTX 4060 Ti: 1.4 GB VRAM idle once loaded, 0.04 s for one question on a ~900-token failure, and 0.33 s for 16 questions at 2.4 GB peak. hivemind asks at most 4 questions per failure and backs off for 10 minutes after any error.
-
-`node install.js --laya setup` prints the steps for your machine and runs none of them (a ~3 GB download). On Linux with NVIDIA the steps are a venv in `~/.local/share/laya/venv` and the systemd user unit [`templates/laya/laya.service`](templates/laya/laya.service). The unit binds 127.0.0.1 only, returns VRAM between requests, and caps memory at 5 GB. The last step is `--laya http://127.0.0.1:47311`. The Apple Silicon steps are untested; on Windows the command points to laya's README. `--doctor` warns when laya is on but no GPU is found.
 
 ### Manual install (any platform)
 
@@ -278,7 +270,6 @@ teams/                       copied into your repo by install.js --project
   skills-lock.json           content hash per linked skill
 templates/
   ci/hive-gates.yml  lefthook.yml
-  laya/laya.service          optional laya unit, printed by --laya setup
   hooks/                     copied to .claude/hooks/ by install-lead-hooks.js:
     hive-autostart.js        SessionStart: makes the session the lead, prints hive-state
     hive-lead-guard.js       the lead never edits deliverables
@@ -294,7 +285,7 @@ install.js                   installer, updater, doctor (install.sh / install.ps
 
 ## Uninstall
 
-Delete the links `~/.claude/skills/hivemind` and `~/.claude/skills/hivemind-review` (the checkout stays), `~/.claude/agents/hive-*.md`, `~/.claude/hivemind.json`, `teams/` in any repo, and the `hive-` entries and hivemind `statusLine` in its `.claude/settings.local.json`. `.github/workflows/hive-gates.yml`, `lefthook.yml`, and `.claude/hooks/` are yours to keep or drop; local run state is in `.git/hive/`. Open `hive-*` issues and labels stay on GitHub for you to close. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back. If you set up laya: `systemctl --user disable --now laya`, then delete `~/.config/systemd/user/laya.service` and `~/.local/share/laya`.
+Delete the links `~/.claude/skills/hivemind` and `~/.claude/skills/hivemind-review` (the checkout stays), `~/.claude/agents/hive-*.md`, `~/.claude/hivemind.json`, `teams/` in any repo, and the `hive-` entries and hivemind `statusLine` in its `.claude/settings.local.json`. `.github/workflows/hive-gates.yml`, `lefthook.yml`, and `.claude/hooks/` are yours to keep or drop; local run state is in `.git/hive/`. Open `hive-*` issues and labels stay on GitHub for you to close. Skills you confined are still in `~/.agents/skills/`; re-link them into `~/.claude/skills/` if you want them global again. Remove the `attribution` key from `~/.claude/settings.json` if you want the default trailer back.
 
 ## License
 

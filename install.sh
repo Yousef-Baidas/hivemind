@@ -8,8 +8,6 @@
 #   ./install.sh --project --install --confine   fetch missing skills, hide them from the lead
 #   ./install.sh --update            git pull this checkout, reinstall, refresh the current repo
 #   ./install.sh --auto-update       let sessions pull this checkout (--no-auto-update: stop)
-#   ./install.sh --laya <url|off|setup>  point lesson recall at a local laya classifier, decline it,
-#                                    or print its GPU setup steps (runs nothing)
 #   ./install.sh --doctor [--fix]    check the setup; --fix applies the safe local fixes
 set -euo pipefail
 
