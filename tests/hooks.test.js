@@ -536,7 +536,7 @@ const OLDNODE = path.join(W, "oldnode.js");
 fs.writeFileSync(OLDNODE, `Object.defineProperty(process, "versions", { value: { ...process.versions, node: process.env.FAKE_NODE } });\n`);
 const CWD = path.join(W, "plain"); fs.mkdirSync(CWD);
 const chome = (n) => { const h = path.join(W, "ch-" + n); fs.mkdirSync(path.join(h, ".claude"), { recursive: true }); return h; };
-const cenv = (h, extra = {}) => ({ HOME: h, CLAUDE_LOG: CLOG, PATH: `${CBIN}:${BIN}:/usr/bin:/bin`, ...extra });
+const cenv = (h, extra = {}) => ({ HOME: h, CLAUDE_LOG: CLOG, PATH: [CBIN, BIN, path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter), ...extra });
 const clog = () => { try { return fs.readFileSync(CLOG, "utf8").split("\n").filter(Boolean); } catch { return []; } };
 const ctxLine = (out) => (out.split("\n").find((l) => l.includes(`${CTX} plugin`)) || "");
 const cjson = (h, ...f) => JSON.parse(fs.readFileSync(path.join(h, ".claude", ...f), "utf8"));

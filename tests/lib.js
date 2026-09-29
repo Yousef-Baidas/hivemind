@@ -1,5 +1,6 @@
-"use strict";
 // Shared harness for tests/*.test.js: assertions, a per-file temp dir, fake gh, spawn helpers.
+// summary() prints "N passed, M failed" and sets exit code 1 if any assertion failed, else 0.
+"use strict";
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -22,7 +23,7 @@ function workdir(name) {
   fs.mkdirSync(BIN);
   fs.copyFileSync(path.join(__dirname, "fakegh.js"), path.join(BIN, "gh"));
   fs.chmodSync(path.join(BIN, "gh"), 0o755);
-  ENV = { PATH: `${BIN}:/usr/bin:/bin`, HOME, GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  ENV = { PATH: [BIN, path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter), HOME, GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
   return W;
 }
 

@@ -1,3 +1,4 @@
+# Gates for main, hive/** and proteus/**: node tests/run.js on push and pull_request; on pull_request also lints every commit message with templates/hooks/commit-msg.js.
 name: ci
 on:
   push:

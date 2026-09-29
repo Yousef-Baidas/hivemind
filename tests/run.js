@@ -1,5 +1,6 @@
-"use strict";
 // Runs every tests/*.test.js in turn and totals their "N passed, M failed" lines.
+// Exits 1 if any file exits non-zero, prints no summary line, or none are found; else 0.
+"use strict";
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
