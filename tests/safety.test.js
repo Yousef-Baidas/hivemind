@@ -3,6 +3,12 @@
 // Every temp dir, the fake "real home" F included, is an fs.mkdtempSync under os.tmpdir(), checked to be outside the user's home
 // before anything is spawned; the installer run is a clone of the checkout there with its uncommitted edits committed, and every
 // run gets an explicit fake HOME and CODEX_HOME, a fake gh and claude, and no network. Case 3 reads install.js; the rest spawn.
+// Amendment 2 (#13): a skill name from teams/*/skills.txt is one path segment or it is skipped (cases 5, 6, 8), the confine
+// delete goes through safeRemove (case 7), the doctor never offers --fix for a dupe it will refuse (case 9), safeRemove's
+// win32 branches hold (case 10), and case 3 covers link-skills.js (remover removeLink) and install-lead-hooks.js (safeUnlink).
+// Case 7 fakes os.userInfo().homedir with a --require preload passed in NODE_OPTIONS, reading FAKE_USER_HOME, so it reaches
+// install.js and every node it spawns. Case 10 requires install.js in a child that fakes win32 and an in-memory disk: install.js,
+// when required rather than run, exports { allowedRoots, safeRemove } and runs nothing.
 // PROTEUS_SAFETY_SRC overrides the checkout cloned and read, for tests only.
 // Exit 0 if every assertion passed, 1 otherwise; exit 1 before any spawn when os.tmpdir() is inside the user's home.
 "use strict";
@@ -74,9 +80,110 @@ if (step.status === 0) step = git(["checkout", "--quiet", "-B", "main"], ORIGIN)
 if (step.status === 0) step = git(["clone", "--quiet", ORIGIN, CHK], TOOLS);
 ok("the checkout clones into a temp dir", step.status === 0, step.stderr);
 
-function installer(args, cwd, home) {
-  if (HOMES.some((h) => under(real(home), h) || under(real(cwd), h))) throw new Error(`refusing to run install.js with ${home} or ${cwd} inside the user's home`);
-  return spawnSync(process.execPath, [path.join(CHK, "install.js"), ...args], { cwd, env: envFor(home), encoding: "utf8", timeout: 180000 });
+// node on script with a fake HOME; refuses a HOME, cwd or extra path (FAKE_USER_HOME) inside the user's home
+function nodeRun(script, args, cwd, home, extra = {}) {
+  const paths = [home, cwd, ...(extra.FAKE_USER_HOME ? [extra.FAKE_USER_HOME] : [])];
+  if (HOMES.some((h) => paths.some((p) => under(real(p), h)))) throw new Error(`refusing to run ${script} with ${paths.join(" or ")} inside the user's home`);
+  return spawnSync(process.execPath, [script, ...args], { cwd, env: { ...envFor(home), ...extra }, encoding: "utf8", timeout: 180000 });
+}
+const installer = (args, cwd, home, extra) => nodeRun(path.join(CHK, "install.js"), args, cwd, home, extra);
+
+// a git repo with one commit whose teams/zz/skills.txt holds lines
+function teamRepo(repo, lines) {
+  fs.mkdirSync(path.join(repo, "teams", "zz"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "README.md"), "# repo\n");
+  fs.writeFileSync(path.join(repo, "teams", "zz", "skills.txt"), lines.map((l) => `${l}\n`).join(""));
+  let g = git(["init", "--quiet"], repo);
+  if (g.status === 0) g = git(["add", "-A"], repo);
+  if (g.status === 0) g = git(["commit", "--quiet", "--no-verify", "-m", "init"], repo);
+  return g;
+}
+const homeAt = (home) => { for (const d of [".claude", ".agents", ".codex"]) fs.mkdirSync(path.join(home, d), { recursive: true }); return home; };
+const linkOf = (p) => { const st = lstat(p); return st && st.isSymbolicLink() ? fs.readlinkSync(p) : null; };
+const dirLink = (target, link) => { fs.mkdirSync(target, { recursive: true }); fs.symlinkSync(target, link, "junction"); };
+// a line of output that names the skill and says it was skipped
+const skipped = (r, name) => `${r.stdout}${r.stderr}`.split("\n").some((l) => l.includes(name) && /skip/i.test(l));
+
+// case 10's child: fakes win32 and an in-memory case-insensitive disk, requires install.js and calls its safeRemove;
+// serialised with toString, so it uses nothing from this file. Prints one "WINPROBE <json>" line.
+function winProbe(installJs) {
+  const fs = require("fs"), os = require("os"), path = require("path"), cp = require("child_process");
+  const out = { calls: [] };
+  const done = () => process.stdout.write(`\nWINPROBE ${JSON.stringify(out)}\n`);
+  // nothing install.js does on load may write or spawn: an unguarded one only gets as far as printing --help
+  const blocked = (n) => () => { throw new Error(`blocked ${n} while loading install.js`); };
+  for (const n of ["writeFileSync", "mkdirSync", "symlinkSync", "copyFileSync", "renameSync", "rmSync", "unlinkSync", "rmdirSync", "cpSync", "appendFileSync"]) fs[n] = blocked(`fs.${n}`);
+  for (const n of ["spawnSync", "execFileSync", "execSync", "spawn", "execFile", "exec"]) cp[n] = blocked(`child_process.${n}`);
+  process.argv = [process.argv[0], installJs, "--help"];
+  process.exit = (c) => { throw new Error(`install.js ran its CLI when required (exit ${c})`); };
+  Object.defineProperty(process, "platform", { value: "win32" });
+  os.homedir = () => "C:\\Users\\Fake";
+  os.userInfo = () => ({ uid: -1, gid: -1, username: "fake", homedir: "C:\\Users\\Real", shell: null });
+  let m;
+  try { m = require(installJs); } catch (e) { out.error = e.message; return done(); }
+  if (!m || typeof m.safeRemove !== "function" || typeof m.allowedRoots !== "function") { out.error = "install.js exports no allowedRoots and safeRemove"; return done(); }
+  const W = path.win32;
+  Object.assign(path, W);
+  const disk = new Map();
+  const add = (p, type, target) => disk.set(p.toLowerCase(), { name: p, type, target });
+  for (const d of ["C:\\", "C:\\Users", "C:\\Users\\Fake", "C:\\Users\\Fake\\.claude", "C:\\Users\\Fake\\.claude\\skills", "C:\\Users\\Fake\\.claude\\agents",
+    "C:\\Users\\Fake\\.agents", "C:\\Users\\Fake\\.agents\\skills", "C:\\Users\\Fake\\.codex", "C:\\Users\\Fake\\.codex\\agents", "C:\\Users\\Real",
+    "C:\\Users\\Real\\.claude", "C:\\Users\\Real\\.claude\\skills", "C:\\src", "C:\\src\\foo", "C:\\src\\j", "D:\\", "D:\\Users", "D:\\Users\\Fake",
+    "D:\\Users\\Fake\\.claude", "D:\\Users\\Fake\\.claude\\skills"]) add(d, "dir");
+  for (const [l, t] of [["C:\\Users\\Fake\\.claude\\skills\\j", "C:\\src\\j"], ["C:\\Users\\Fake\\.claude\\skills\\foo", "C:\\src\\foo"],
+    ["D:\\Users\\Fake\\.claude\\skills\\foo", "C:\\src\\foo"], ["C:\\Users\\Real\\.claude\\skills\\foo", "C:\\src\\foo"]]) add(l, "junction", t);
+  const has = (p) => disk.has(p.toLowerCase());
+  const err = (code, p) => Object.assign(new Error(`${code}: ${p}`), { code });
+  // every junction followed, the caller's case kept, like node's realpathSync on Windows: a root match must ignore case itself
+  const realOf = (p) => {
+    const abs = W.resolve(p), root = W.parse(abs).root;
+    if (!has(root)) throw err("ENOENT", p);
+    let at = root;
+    for (const part of abs.slice(root.length).split("\\").filter(Boolean)) {
+      const e = disk.get(W.join(at, part).toLowerCase());
+      if (!e) throw err("ENOENT", p);
+      at = e.type === "junction" ? realOf(e.target) : W.join(at, part);
+    }
+    return at;
+  };
+  const entry = (p) => {
+    const abs = W.resolve(p), up = W.dirname(abs);
+    if (up === abs) return disk.get(abs.toLowerCase()) || null;
+    try { return disk.get(W.join(realOf(up), W.basename(abs)).toLowerCase()) || null; } catch { return null; }
+  };
+  const kids = (e) => [...disk.values()].filter((c) => c !== e && W.dirname(c.name).toLowerCase() === e.name.toLowerCase());
+  const stats = (e) => ({ isSymbolicLink: () => e.type === "junction", isDirectory: () => e.type === "dir", isFile: () => false, mtimeMs: 0, size: 0 });
+  const need = (p, o) => { const e = entry(p); if (!e && !(o && o.throwIfNoEntry === false)) throw err("ENOENT", p); return e; };
+  fs.lstatSync = (p, o) => { const e = need(p, o); return e ? stats(e) : undefined; };
+  fs.statSync = (p, o) => { const e = need(p, o); return e ? stats(e.type === "junction" ? disk.get(realOf(e.target).toLowerCase()) : e) : undefined; };
+  fs.realpathSync = (p) => realOf(p);
+  fs.realpathSync.native = fs.realpathSync;
+  fs.existsSync = (p) => { try { realOf(p); return true; } catch { return false; } };
+  fs.accessSync = (p) => { realOf(p); };
+  fs.readlinkSync = (p) => { const e = need(p); if (e.type !== "junction") throw err("EINVAL", p); return e.target; };
+  fs.readdirSync = (p) => kids(disk.get(realOf(p).toLowerCase())).map((c) => W.basename(c.name));
+  // Windows: unlink on a junction or a directory is EPERM; rmdir removes a junction or an empty directory
+  fs.unlinkSync = (p) => { out.calls.push(`unlink ${p}`); need(p); throw err("EPERM", p); };
+  fs.rmdirSync = (p) => { out.calls.push(`rmdir ${p}`); const e = need(p); if (e.type === "dir" && kids(e).length) throw err("ENOTEMPTY", p); disk.delete(e.name.toLowerCase()); };
+  fs.rmSync = (p, o) => {
+    out.calls.push(`rm ${p}`);
+    const e = entry(p);
+    if (!e) { if (o && o.force) return; throw err("ENOENT", p); }
+    const gone = [e, ...(e.type === "dir" ? [...disk.values()].filter((c) => c.name.toLowerCase().startsWith(`${e.name.toLowerCase()}\\`)) : [])];
+    if (gone.length > 1 && !(o && o.recursive)) throw err("ENOTEMPTY", p);
+    for (const c of gone) disk.delete(c.name.toLowerCase());
+  };
+  try {
+    const roots = m.allowedRoots("C:\\Users\\Fake", "C:\\Users\\Fake\\.codex", null);
+    out.roots = roots;
+    const j = "C:\\Users\\Fake\\.claude\\skills\\j";
+    out.junction = { removed: m.safeRemove(j, roots), gone: !has(j), target: has("C:\\src\\j"), calls: out.calls.filter((c) => c.endsWith(j)) };
+    out.cased = { removed: m.safeRemove("c:\\users\\FAKE\\.Claude\\Skills\\foo", roots), gone: !has("C:\\Users\\Fake\\.claude\\skills\\foo") };
+    out.drive = { removed: m.safeRemove("D:\\Users\\Fake\\.claude\\skills\\foo", roots), kept: has("D:\\Users\\Fake\\.claude\\skills\\foo") };
+    out.user = { removed: m.safeRemove("C:\\Users\\Real\\.claude\\skills\\foo", roots), kept: has("C:\\Users\\Real\\.claude\\skills\\foo") };
+    out.source = { kept: has("C:\\src\\foo") };
+  } catch (e) { out.error = `threw: ${e.message}`; }
+  done();
 }
 
 // F stands in for a real home: a shipped agent copy and a proteus skill link in F/.claude, the fake HOME at F/fakehome
@@ -171,17 +278,103 @@ try {
     const moved = drift(before, snapshot(t.F, skip));
     ok("nothing in F outside the fake HOME's .claude, .agents, .codex and the repo is removed or changed", !moved.length, moved.join(", "));
     intact(t, "install.js, --update and --project in a repo under F");
+
+    // case 5, traversal with --confine: skill names that climb out of HOME/.claude/skills are skipped, never removed
+    const T5 = tmp("confine"), H5 = homeAt(path.join(T5, "home")), R5 = path.join(T5, "repo");
+    dirLink(path.join(T5, "tgt_a"), path.join(H5, "dotlink"));
+    dirLink(path.join(T5, "tgt_b"), path.join(T5, "victim"));
+    ok("case 5: the repo with ../ skill names is set up", teamRepo(R5, ["a/b ../../dotlink", "a/b ../../../victim"]).status === 0);
+    const r5 = installer(["--project", "--confine"], R5, H5);
+    ok("case 5 (traversal, --confine): HOME/dotlink survives with its target", linkOf(path.join(H5, "dotlink")) === path.join(T5, "tgt_a"), `${r5.status} ${r5.stderr}`);
+    ok("case 5 (traversal, --confine): T/victim outside HOME survives with its target", linkOf(path.join(T5, "victim")) === path.join(T5, "tgt_b"), `${r5.status} ${r5.stderr}`);
+    ok("case 5 (traversal, --confine): the output warns that both names were skipped", skipped(r5, "../../dotlink") && skipped(r5, "../../../victim"), `${r5.stdout}${r5.stderr}`);
+
+    // case 6, traversal with plain --project: a ../ name outside HOME and the repo re-points no link and creates no dir
+    const T6 = tmp("project"), H6 = homeAt(path.join(T6, "a", "b", "c", "home")), R6 = path.join(T6, "repo");
+    fs.mkdirSync(path.join(T6, "a", "X"));
+    fs.mkdirSync(path.join(T6, "a", "newdir", "Y"), { recursive: true });
+    dirLink(path.join(T6, "orig"), path.join(T6, "X"));
+    ok("case 6: the repo with ../ skill names is set up", teamRepo(R6, ["a/b ../../../../../X", "a/b ../../../../../newdir/Y"]).status === 0);
+    const before6 = snapshot(T6, [R6, H6]);
+    const r6 = installer(["--project"], R6, H6);
+    ok("case 6 (traversal, --project): T/X still points at T/orig", linkOf(path.join(T6, "X")) === path.join(T6, "orig"), `${r6.status} ${linkOf(path.join(T6, "X"))}`);
+    ok("case 6 (traversal, --project): no T/newdir is created", !lstat(path.join(T6, "newdir")));
+    const moved6 = drift(before6, snapshot(T6, [R6, H6]));
+    ok("case 6 (traversal, --project): nothing outside HOME and the repo is removed, changed or added", !moved6.length, moved6.join(", "));
+
+    // case 7, symlinked .claude: HOME/.claude points into the (faked) real home, so --confine must leave its skills/foo
+    const T7 = tmp("symclaude"), F7 = path.join(T7, "realhome"), H7 = path.join(T7, "fakehome"), R7 = path.join(T7, "repo");
+    fs.mkdirSync(path.join(F7, ".claude", "skills"), { recursive: true });
+    fs.mkdirSync(path.join(T7, "src", "foo"), { recursive: true });
+    fs.writeFileSync(path.join(T7, "src", "foo", "SKILL.md"), "---\nname: foo\ndescription: test skill\n---\n");
+    fs.symlinkSync(path.join(T7, "src", "foo"), path.join(F7, ".claude", "skills", "foo"), "junction");
+    fs.mkdirSync(H7);
+    fs.symlinkSync(path.join(F7, ".claude"), path.join(H7, ".claude"), "junction");
+    for (const d of [".agents", ".codex"]) fs.mkdirSync(path.join(H7, d));
+    ok("case 7: the repo listing foo is set up", teamRepo(R7, ["a/b foo"]).status === 0);
+    const preload = path.join(TOOLS, "fake-userinfo.js");
+    fs.writeFileSync(preload, `"use strict";\n// test fake: os.userInfo().homedir is FAKE_USER_HOME\nconst os = require("os");\nconst h = process.env.FAKE_USER_HOME;\nif (h) { const u = os.userInfo; os.userInfo = (o) => ({ ...u(o), homedir: h }); }\n`);
+    fs.writeFileSync(path.join(TOOLS, "userhome.js"), "console.log(require(\"os\").userInfo().homedir);\n");
+    const fake7 = { NODE_OPTIONS: `--require ${preload}`, FAKE_USER_HOME: F7 };
+    const echo = nodeRun(path.join(TOOLS, "userhome.js"), [], T7, H7, fake7);
+    ok("case 7: the preload fakes os.userInfo().homedir in a spawned node", echo.stdout === `${F7}\n`, `${echo.status} ${echo.stdout}${echo.stderr}`);
+    const r7 = installer(["--project", "--confine"], R7, H7, fake7);
+    ok("case 7 (symlinked .claude, --confine): the real home's skills/foo link survives", linkOf(path.join(F7, ".claude", "skills", "foo")) === path.join(T7, "src", "foo"), `${r7.status} ${r7.stderr}`);
+
+    // case 8, standalone link-skills.js: a ../ name changes nothing outside teams/<p>/{.claude,.agents}/skills and HOME/.claude/skills
+    const T8 = tmp("standalone"), H8 = homeAt(path.join(T8, "a", "b", "c", "home")), R8 = path.join(T8, "repo");
+    fs.mkdirSync(path.join(H8, ".claude", "skills"));
+    fs.mkdirSync(path.join(T8, "a", "X"));
+    dirLink(path.join(T8, "orig"), path.join(T8, "X"));
+    dirLink(path.join(T8, "tgt"), path.join(H8, "dot8"));
+    const own8 = [path.join(R8, "teams", "zz", ".claude", "skills"), path.join(R8, "teams", "zz", ".agents", "skills"), path.join(H8, ".claude", "skills")];
+    for (const d of own8) fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(R8, "teams", "zz", "skills.txt"), "a/b ../../../../../X\na/b ../../dot8\n");
+    fs.copyFileSync(path.join(CHK, "templates", "teams", "link-skills.js"), path.join(R8, "teams", "link-skills.js"));
+    const before8 = snapshot(T8, own8);
+    const r8 = [[], ["--confine"]].map((a) => nodeRun(path.join(R8, "teams", "link-skills.js"), a, R8, H8));
+    const moved8 = drift(before8, snapshot(T8, own8));
+    ok("case 8 (standalone link-skills.js): nothing outside the team skill dirs and HOME/.claude/skills changes", !moved8.length, moved8.join(", "));
+    ok("case 8 (standalone link-skills.js): T/X and HOME/dot8 keep their targets", linkOf(path.join(T8, "X")) === path.join(T8, "orig") && linkOf(path.join(H8, "dot8")) === path.join(T8, "tgt"));
+    ok("case 8 (standalone link-skills.js): both runs warn that the names were skipped", r8.every((r) => skipped(r, "../../../../../X") && skipped(r, "../../dot8")), r8.map((r) => `${r.status} ${r.stderr}`).join(" | "));
+
+    // case 9, doctor outside a repo: --fix would refuse the dupe, so its row names the manual step, never --doctor --fix
+    const T9 = tmp("remedy"), H9 = homeAt(path.join(T9, "home")), P9 = path.join(T9, "plain");
+    const dupe9 = path.join(P9, ".claude", "skills", "proteus");
+    fs.mkdirSync(path.dirname(dupe9), { recursive: true });
+    fs.symlinkSync(path.join(CHK, "skills", "proteus"), dupe9, "junction");
+    const r9 = installer(["--doctor"], P9, H9);
+    const rows9 = (r9.stdout || "").split("\n").filter((l) => l.includes(dupe9));
+    ok("case 9 (doctor outside a repo): a row names the duplicate copy", rows9.length > 0, `${r9.status} ${r9.stdout}`);
+    ok("case 9 (doctor outside a repo): the duplicate row does not recommend --doctor --fix", rows9.length > 0 && !rows9.some((l) => l.includes("--doctor --fix")), rows9.join(" | "));
   }
 
-  // case 3, grep: every rmSync, unlinkSync and rmdirSync in install.js sits inside safeRemove
-  const text = fs.readFileSync(path.join(SRC, "install.js"), "utf8");
-  const body = fnBody(text, "safeRemove");
-  const stray = [];
-  for (const m of text.matchAll(/\b(rmSync|unlinkSync|rmdirSync)\b/g)) {
-    if (!body || m.index < body[0] || m.index >= body[1]) stray.push(`install.js:${text.slice(0, m.index).split("\n").length} ${m[1]}`);
+  // case 3, grep: every rmSync, unlinkSync and rmdirSync in each file sits inside that file's one guard or remover
+  for (const [file, guard] of [["install.js", "safeRemove"], ["templates/teams/link-skills.js", "removeLink"], ["templates/hooks/install-lead-hooks.js", "safeUnlink"]]) {
+    const text = fs.readFileSync(path.join(SRC, ...file.split("/")), "utf8");
+    const body = fnBody(text, guard);
+    const stray = [];
+    for (const m of text.matchAll(/\b(rmSync|unlinkSync|rmdirSync)\b/g)) {
+      if (!body || m.index < body[0] || m.index >= body[1]) stray.push(`${file}:${text.slice(0, m.index).split("\n").length} ${m[1]}`);
+    }
+    ok(`${file} defines function ${guard}`, !!body);
+    ok(`rmSync, unlinkSync and rmdirSync appear in ${file} only inside ${guard}`, !stray.length, stray.join(", "));
   }
-  ok("install.js defines function safeRemove", !!body);
-  ok("rmSync, unlinkSync and rmdirSync appear in install.js only inside safeRemove", !stray.length, stray.join(", "));
+
+  // case 10, win32: safeRemove falls back from unlink to rmdir for a junction and matches roots without case
+  const probe = path.join(TOOLS, "win-probe.js");
+  fs.writeFileSync(probe, `"use strict";\n(${winProbe.toString()})(${JSON.stringify(path.join(SRC, "install.js"))});\n`);
+  const wr = nodeRun(probe, [], TOOLS, homeAt(path.join(tmp("win"), "home")));
+  const wm = /^WINPROBE (.*)$/m.exec(wr.stdout || "");
+  const w10 = wm ? JSON.parse(wm[1]) : { error: `no probe result: ${wr.status} ${wr.stderr}` };
+  const why = JSON.stringify(w10);
+  ok("case 10 (win32): install.js, required, exports allowedRoots and safeRemove and runs nothing", !w10.error, why);
+  const jn = w10.junction || {};
+  ok("case 10 (win32): a junction under HOME/.claude/skills is removed", jn.removed === true && jn.gone === true && jn.target === true, why);
+  ok("case 10 (win32): the junction goes by rmdir after unlink fails with EPERM", ((jn.calls || [])[0] || "").startsWith("unlink ") && (jn.calls || []).slice(1).some((c) => c.startsWith("rmdir ")), why);
+  ok("case 10 (win32): a differently-cased path under HOME matches its root and is removed", (w10.cased || {}).removed === true && w10.cased.gone === true, why);
+  ok("case 10 (win32): the same path on another drive is refused", (w10.drive || {}).removed === false && w10.drive.kept === true, why);
+  ok("case 10 (win32): the same path in the real user home is refused", (w10.user || {}).removed === false && w10.user.kept === true && (w10.source || {}).kept === true, why);
 
   // case 4, workdir: a test file whose os.tmpdir() is inside a git worktree stops before it creates anything
   const w = tmp("repo");
