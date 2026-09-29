@@ -458,7 +458,7 @@ ok("scratch: --path binds the agent's later strays", entry("hs-clone") && entry(
 bash(`ln -s ${OUTSIDE} ${t("hs-link")}; mkdir ${t("hs-dir")}; ln -s ${OUTSIDE} ${t("hs-dir")}/out; mkdir ${t("hs-replaced")}`, () => {
   fs.symlinkSync(OUTSIDE, t("hs-link")); fs.mkdirSync(t("hs-dir")); fs.symlinkSync(OUTSIDE, t("hs-dir/out")); fs.mkdirSync(t("hs-replaced"));
 });
-fs.rmdirSync(t("hs-replaced")); fs.writeFileSync(t("hs-other"), "o"); fs.mkdirSync(t("hs-replaced")); // new inode
+fs.mkdirSync(t("hs-replaced-new")); fs.rmdirSync(t("hs-replaced")); fs.writeFileSync(t("hs-other"), "o"); fs.renameSync(t("hs-replaced-new"), t("hs-replaced")); // new inode, made while the old one is alive so it cannot be reused
 // forged ledger lines pointing outside the temp dir
 const outIno = fs.lstatSync(path.join(OUTSIDE, "keep.txt")).ino;
 fs.appendFileSync(LEDGER, JSON.stringify({ path: path.join(OUTSIDE, "keep.txt"), key: "bl1077", ino: outIno, at: 0 }) + "\n" + JSON.stringify({ path: `${TMPD}/../outside`, key: "bl1077", at: 0 }) + "\nnot json\n");
