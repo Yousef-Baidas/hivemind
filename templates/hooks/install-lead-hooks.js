@@ -6,8 +6,10 @@
 // (Claude Code: .claude/settings.local.json, machine-local and untracked, so worktrees never inherit it).
 // Idempotent: an entry whose command already names the script is left alone, other hooks are
 // never touched, an old narrower proteus-lead-guard matcher is widened. Invalid JSON → exit 1.
-// Every delete goes through safeUnlink: a regular file whose real parent is exactly the real hooksDir
-// (.claude/hooks, or .codex/hooks for Codex), nothing else (#13). PROTEUS_KEEP_SKIPPED=1 (set by
+// The hooks dir is the real cwd plus fixed segments (.claude/hooks, or .codex/hooks for Codex), each
+// lstat'd a real directory: a link on the way (a repo may commit one) refuses everything, exit 1 (#13).
+// Every delete goes through safeUnlink: a regular file whose real parent is exactly that dir,
+// nothing else. PROTEUS_KEEP_SKIPPED=1 (set by
 // install.js, which removes those copies through its own guard first) skips the removal entirely.
 "use strict";
 const fs = require("fs");
@@ -21,11 +23,27 @@ const skip = new Set(ad.skipHooks || []);
 const keepSkipped = process.env.PROTEUS_KEEP_SKIPPED === "1";
 const same = (a, b) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
 
-// true if the file p was removed; false if absent, not a regular file, or not directly in hooksDir
+// the real cwd joined with hooksDir's segments, each lstat'd a real directory (made if missing when
+// make); null when one is a link or not a directory
+function ownHooksDir(make) {
+  let d;
+  try { d = fs.realpathSync("."); } catch { return null; }
+  for (const s of hooksDir.split(path.sep).filter((x) => x && x !== ".")) {
+    d = path.join(d, s);
+    let st = null;
+    try { st = fs.lstatSync(d); } catch {}
+    if (!st && make) { try { fs.mkdirSync(d); st = fs.lstatSync(d); } catch {} }
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) return null;
+  }
+  return d;
+}
+
+// true if the file p was removed; false if absent, not a regular file, or not directly in ownHooksDir
 function safeUnlink(p) {
   try {
     if (!fs.lstatSync(p).isFile()) return false;
-    if (!same(fs.realpathSync(path.dirname(path.resolve(p))), fs.realpathSync(hooksDir))) {
+    const own = ownHooksDir(false);
+    if (!own || !same(fs.realpathSync(path.dirname(path.resolve(p))), own)) {
       console.error(`refused  ${p} (not directly in ${hooksDir}; left alone)`);
       return false;
     }
@@ -34,7 +52,11 @@ function safeUnlink(p) {
   } catch { return false; }
 }
 
-fs.mkdirSync(hooksDir, { recursive: true });
+if (!ownHooksDir(true)) {
+  console.error(`refused  ${hooksDir} (a link, or a link on the way; nothing copied, removed or registered)`);
+  process.exitCode = 1;
+  return;
+}
 let copied = 0, removed = 0;
 for (const f of fs.readdirSync(__dirname)) {
   if (f === self || !fs.statSync(path.join(__dirname, f)).isFile()) continue;
