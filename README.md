@@ -268,7 +268,7 @@ Each line is `ok`, `WARN`, or `FIX`; the exit code is 1 while a `FIX` remains. I
 
 1. Link or copy `skills/proteus/` and `skills/proteus-review/` to `~/.claude/skills/`. Not also to `<repo>/.claude/skills/`: two copies show up as two commands.
 2. Copy `agents/*.md` to `~/.claude/agents/`.
-3. Copy `teams/` into your repo and run `node teams/link-skills.js --install`. Copy `templates/` to `teams/templates/` and run `node teams/templates/hooks/install-lead-hooks.js` from the repo root.
+3. Copy `templates/teams/` into your repo as `teams/` and run `node teams/link-skills.js --install`. Copy `templates/` except `templates/teams/` to `teams/templates/` and run `node teams/templates/hooks/install-lead-hooks.js` from the repo root.
 4. Merge into `~/.claude/settings.json`:
    ```json
    { "attribution": { "commit": "", "pr": "", "sessionUrl": false } }
@@ -306,7 +306,7 @@ agents/
   proteus-qa-verifier.md        per wave, deep per milestone and at close
   proteus-guide.md              review brief + evidence per milestone
   proteus-scout.md              designs the roster and picks skills (lead's tier)
-teams/                       copied into your repo by install.js --project
+templates/teams/             the shipped roster, copied into your repo's teams/ by install.js --project
   ROUTING.md                 deliverable type or path -> owning team
   link-skills.js (.sh .ps1)  links (or installs) each team's skills
   <team>/PROFILE.md          role, owns, rules, green additions, verifier checklist
