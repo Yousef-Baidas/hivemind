@@ -414,10 +414,13 @@ function teamsIgnore(teams, act) {
 
 function copyTeams(root) {
   const teams = path.join(root, "teams");
+  // self-host: the checkout's own templates/ and link scripts are the source, never copied into git
+  const self = samePath(real(root), real(HERE));
   fs.mkdirSync(teams, { recursive: true });
   teamsIgnore(teams, true);
-  for (const f of LINK_SCRIPTS) copyFile(path.join(SHIPPED_TEAMS, f), path.join(teams, f));
+  if (!self) for (const f of LINK_SCRIPTS) copyFile(path.join(SHIPPED_TEAMS, f), path.join(teams, f));
   copyTree(path.join(HERE, "templates"), path.join(teams, "templates"), [SHIPPED_TEAMS]);
+  if (self) excludeLocal(root, ["teams/templates/"], "teams/templates, a copy of this checkout's templates/");
   // renamed to worktree-settings.local.json; drop the old copy only if nobody edited it
   const stale = path.join(teams, "templates", "hooks", "settings.local.json");
   const t = readText(stale);
@@ -437,7 +440,7 @@ function copyTeams(root) {
     // required.txt is the pipeline's, not the scout's or the repo's: always refreshed
     if (isFile(path.join(src, "required.txt"))) copyFile(path.join(src, "required.txt"), path.join(dest, "required.txt"));
   }
-  log(`teams    -> ${teams} (ROUTING.md, PROFILE.md, skills.txt, link-skills.*, templates/)`);
+  log(`teams    -> ${teams} (ROUTING.md, PROFILE.md, skills.txt, ${self ? "" : "link-skills.*, "}templates/)`);
 }
 
 function projectInstall(root, opt) {
@@ -675,7 +678,6 @@ function install(opt) {
   if (!nodeOk()) die(`node ${process.versions.node} is older than ${NODE_MIN}, which the required context-mode plugin needs. Upgrade: ${nodeFix()}, then re-run`);
   const autoUpdate = opt.autoUpdate ? true : opt.noAutoUpdate ? false : undefined;
   const root = process.cwd();
-  if (opt.project && samePath(real(root), real(HERE))) die("--project sets up your repo; run it from there, not from the Proteus checkout");
   if (opt.project && samePath(real(root), real(HOME))) die("--project sets up a repo; run it from the repo root, not from your home directory");
   const fresh = !lstat(CONFIG) && !lstat(OLD_CONFIG);
   const repoOld = opt.project ? [...migrateProject(root, false).harnesses] : [];
@@ -764,9 +766,11 @@ function tourDone() {
 async function doctor(fix) {
   const root = process.cwd();
   const top = git(["rev-parse", "--show-toplevel"], root);
-  const inRepo = top.ok && !samePath(real(top.out), real(HERE));
-  const hive = inRepo && isDir(path.join(root, "teams"));
   const cxh = codex();
+  // the checkout gets project checks once --project has set it up (self-host)
+  const checkout = top.ok && samePath(real(top.out), real(HERE));
+  const inRepo = top.ok && (!checkout || isProteusProject(top.out, cxh ? "codex" : "claude"));
+  const hive = inRepo && isDir(path.join(root, "teams"));
   const self = `node "${path.join(HERE, "install.js")}"${cxh ? " --harness codex" : ""}`;
   const hd = cxh ? ".codex" : ".claude";
   const checks = [];
@@ -882,8 +886,8 @@ async function doctor(fix) {
   });
 
   if (!inRepo) {
-    const where = top.ok ? "in the Proteus checkout" : "not inside a git repo";
-    check(() => ["WARN", `${where}; project checks skipped`, "cd into your repo and re-run"]);
+    const where = top.ok ? "in the Proteus checkout, not set up for self-host" : "not inside a git repo";
+    check(() => ["WARN", `${where}; project checks skipped`, top.ok ? `${self} --project, or cd into your repo and re-run` : "cd into your repo and re-run"]);
   } else {
     check(() => {
       const remotes = git(["remote", "-v"], root).out;
