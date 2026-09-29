@@ -8,31 +8,17 @@ const { spawnSync, execFileSync } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
 const SRC = path.join(ROOT, "templates", "hooks");
-const W = path.join(os.tmpdir(), "proteus-test");
-fs.rmSync(W, { recursive: true, force: true });
-fs.mkdirSync(W, { recursive: true });
-const HOME = path.join(W, "home");
-const BIN = path.join(W, "bin");
-fs.mkdirSync(path.join(HOME, ".claude"), { recursive: true });
-fs.mkdirSync(BIN);
-fs.copyFileSync(path.join(__dirname, "fakegh.js"), path.join(BIN, "gh"));
-fs.chmodSync(path.join(BIN, "gh"), 0o755);
-const ENV = { PATH: `${BIN}:/usr/bin:/bin`, HOME, GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
-const g = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const lib = require(path.join(__dirname, "lib.js"));
+const { ok, g } = lib;
+const W = lib.workdir("hooks");
+const { HOME, BIN, ENV } = lib;
 
-let pass = 0, fail = 0;
 const timings = {};
-function ok(name, cond, extra) {
-  if (cond) pass++; else { fail++; console.log(`FAIL ${name}${extra ? " :: " + String(extra).slice(0, 600) : ""}`); }
-}
-function run(script, input, { cwd = REPO, env = {}, args = [] } = {}) {
-  const t = process.hrtime.bigint();
-  const r = spawnSync(process.execPath, [script, ...args], { cwd, input: typeof input === "string" ? input : JSON.stringify(input || {}), env: { ...ENV, CLAUDE_PROJECT_DIR: cwd, ...env }, encoding: "utf8" });
-  const ms = Number(process.hrtime.bigint() - t) / 1e6;
-  const k = path.basename(script);
-  (timings[k] = timings[k] || []).push(ms);
-  return { code: r.status, out: r.stdout, err: r.stderr, ms };
-}
+const run = (script, input, opts = {}) => {
+  const r = lib.run(script, input, { cwd: REPO, ...opts });
+  (timings[path.basename(script)] = timings[path.basename(script)] || []).push(r.ms);
+  return r;
+};
 
 // ---- Proteus source checkout with an upstream (local bare repo, no network)
 const BARE = path.join(W, "remote.git");
@@ -472,7 +458,7 @@ ok("scratch: --path binds the agent's later strays", entry("hs-clone") && entry(
 bash(`ln -s ${OUTSIDE} ${t("hs-link")}; mkdir ${t("hs-dir")}; ln -s ${OUTSIDE} ${t("hs-dir")}/out; mkdir ${t("hs-replaced")}`, () => {
   fs.symlinkSync(OUTSIDE, t("hs-link")); fs.mkdirSync(t("hs-dir")); fs.symlinkSync(OUTSIDE, t("hs-dir/out")); fs.mkdirSync(t("hs-replaced"));
 });
-fs.rmdirSync(t("hs-replaced")); fs.writeFileSync(t("hs-other"), "o"); fs.mkdirSync(t("hs-replaced")); // new inode
+fs.mkdirSync(t("hs-replaced-new")); fs.rmdirSync(t("hs-replaced")); fs.writeFileSync(t("hs-other"), "o"); fs.renameSync(t("hs-replaced-new"), t("hs-replaced")); // new inode, made while the old one is alive so it cannot be reused
 // forged ledger lines pointing outside the temp dir
 const outIno = fs.lstatSync(path.join(OUTSIDE, "keep.txt")).ino;
 fs.appendFileSync(LEDGER, JSON.stringify({ path: path.join(OUTSIDE, "keep.txt"), key: "bl1077", ino: outIno, at: 0 }) + "\n" + JSON.stringify({ path: `${TMPD}/../outside`, key: "bl1077", at: 0 }) + "\nnot json\n");
@@ -550,7 +536,7 @@ const OLDNODE = path.join(W, "oldnode.js");
 fs.writeFileSync(OLDNODE, `Object.defineProperty(process, "versions", { value: { ...process.versions, node: process.env.FAKE_NODE } });\n`);
 const CWD = path.join(W, "plain"); fs.mkdirSync(CWD);
 const chome = (n) => { const h = path.join(W, "ch-" + n); fs.mkdirSync(path.join(h, ".claude"), { recursive: true }); return h; };
-const cenv = (h, extra = {}) => ({ HOME: h, CLAUDE_LOG: CLOG, PATH: `${CBIN}:${BIN}:/usr/bin:/bin`, ...extra });
+const cenv = (h, extra = {}) => ({ HOME: h, CLAUDE_LOG: CLOG, PATH: [CBIN, BIN, path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter), ...extra });
 const clog = () => { try { return fs.readFileSync(CLOG, "utf8").split("\n").filter(Boolean); } catch { return []; } };
 const ctxLine = (out) => (out.split("\n").find((l) => l.includes(`${CTX} plugin`)) || "");
 const cjson = (h, ...f) => JSON.parse(fs.readFileSync(path.join(h, ".claude", ...f), "utf8"));
@@ -1094,7 +1080,6 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
     /lead     -> \.codex\/hooks\.json/.test(r.out) && !/settings\.local\.json/.test(r.out) && !fs.existsSync(path.join(XP, ".claude")), r.out + r.err);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exitCode = fail ? 1 : 0;
+lib.summary();
 const med = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
 console.log("median ms: " + Object.entries(timings).map(([k, v]) => `${k}=${med(v).toFixed(0)}`).join(" ") + ` statusline(warm)=${med(slTimes).toFixed(0)}`);
