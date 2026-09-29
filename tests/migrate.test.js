@@ -2,8 +2,11 @@
 // Legacy fixtures in one mkdtemp dir under os.tmpdir(): repos with an open hive/<run> run (packed refs, as git gc leaves
 // them), .git/hive/ state and journal, hive labels in a stateful fake gh, a Codex config.toml naming ../<repo>-hive, and a
 // fake HOME installed from main at 7d3d544 then fast-forwarded by its own autostart. One case per contract item: the
-// Check, the auto-update path, and Addendum 2 items 1-4. PROTEUS_MIGRATE_SRC overrides the checkout under test (tests
-// only). Never the network, the real ~/.claude, ~/.codex or ~/.pi, or a write to the checkout.
+// Check, the auto-update path, and Addendum 2 items 1-4; then the PR #16 review items: the journal split an auto-update
+// leaves (merged, legacy lines first), the Codex -proteus root at session start, a `#` inside a writable root, an
+// unreadable .git/hive entry under --project, and a worktree registered in legacy scratch. PROTEUS_MIGRATE_SRC
+// overrides the checkout under test (tests only). Never the network, the real ~/.claude, ~/.codex or ~/.pi, or a
+// write to the checkout.
 // Exit 0 if every assertion passed, 1 otherwise.
 "use strict";
 const fs = require("fs");
@@ -103,6 +106,37 @@ const sessionStart = (repo, home, source) => run(path.join(repo, ".claude", "hoo
 // no background fetch of the checkout, no fast-forward: the autostart only reads it
 const quiet = (home) => { const f = path.join(home, ".claude", "proteus.json"); const c = JSON.parse(read(f) || "{}"); fs.writeFileSync(f, JSON.stringify({ ...c, autoUpdate: false, lastFetch: Date.now() })); };
 const doctorNames = (out) => /^(FIX|WARN|FAIL)\b.*\.git[\\/]hive\b/m.test(out);
+const lines = (text) => String(text || "").split(/\r?\n/).filter(Boolean);
+// the new hooks as an auto-update leaves them: this checkout's hooks copied into the repo, a skill to autostart from
+const newHooks = (repo, hooksDir = [".claude", "hooks"], skillDir = [".claude", "skills", "proteus"]) => {
+  fs.cpSync(path.join(SRC, "templates", "hooks"), path.join(repo, ...hooksDir), { recursive: true });
+  fs.mkdirSync(path.join(repo, ...skillDir), { recursive: true });
+  fs.writeFileSync(path.join(repo, ...skillDir, "SKILL.md"), "---\nname: proteus\n---\nSKILL BODY\n");
+};
+// writable_roots under [sandbox_workspace_write], read strictly: the array's values, or null unless it is
+// comma-separated TOML strings (comments and one trailing comma allowed) with nothing but a comment after the ]
+function tomlRoots(text) {
+  const m = /^[ \t]*\[sandbox_workspace_write\][ \t]*(#[^\n]*)?\r?\n(?:(?![ \t]*\[)[^\n]*\n)*?[ \t]*writable_roots[ \t]*=[ \t]*\[/m.exec(text);
+  if (!m) return null;
+  const vals = [];
+  let want = "value";
+  for (let i = m.index + m[0].length; i < text.length;) {
+    const c = text[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === "#") { while (i < text.length && text[i] !== "\n") i++; continue; }
+    if (c === "]") return /^[ \t]*(#[^\n]*)?(\r?\n|$)/.test(text.slice(i + 1)) ? vals : null;
+    if (c === ",") { if (want !== "comma") return null; want = "value"; i++; continue; }
+    if (want !== "value") return null; // two values with no comma between them
+    const s = c === '"' ? /^"((?:[^"\\\n]|\\.)*)"/.exec(text.slice(i)) : c === "'" ? /^'([^'\n]*)'/.exec(text.slice(i)) : null;
+    if (!s) return null;
+    let v = s[1];
+    if (c === '"') { try { v = JSON.parse(`"${v}"`); } catch { return null; } }
+    vals.push(v);
+    want = "comma";
+    i += s[0].length;
+  }
+  return null;
+}
 
 // a repo on the pre-rename names: hive/<run> run with a ticket branch and evidence, .git/hive/ state and journal
 function legacyRepo(name, { open = true } = {}) {
@@ -296,6 +330,157 @@ let LR = "", HB = "", PH = "";
   ok("orphan (4): --project never overwrites a file already in .git/proteus", r.code === 0 && read(LF, ".git", "proteus", "lead-model.json") === "{\"model\":\"mine\"}\n", read(LF, ".git", "proteus", "lead-model.json"));
   ok("orphan (4): the journal moves beside it, byte for byte", read(LF, ".git", "proteus", "journal.jsonl") === JOURNAL, read(LF, ".git", "proteus", "journal.jsonl"));
   ok("orphan (4): a .git/hive left behind by the conflict is reported by --doctor, never silently kept", !exists(LF, ".git", "hive") || doctorNames(d.out), d.out.split("\n").filter((l) => /hive/.test(l)).join(" | ") || d.out.slice(0, 300));
+}
+
+// ---- journal split (PR #16 review): after an auto-update the new hooks write .git/proteus/journal.jsonl while the old
+// one waits in .git/hive. Order pinned here: the legacy lines first, then the new ones, each file in its own order (the
+// legacy file is the older one; in this fixture that is also timestamp order). Each line once; a second run is a no-op.
+const NEWER = [
+  { ts: "2026-09-29T09:00:00.000Z", session_id: "s1", prompt: "after the update: ship the cli before the store" },
+  { ts: "2026-09-29T09:10:00.000Z", session_id: "s1", prompt: "no new dependencies in the cli" },
+].map((l) => JSON.stringify(l) + "\n").join("");
+const MERGED = [...lines(JOURNAL), ...lines(NEWER)];
+const NEW_PROMPT = JSON.parse(lines(NEWER)[1]).prompt;
+const splitRepo = (name) => {
+  const d = legacyRepo(name);
+  fs.mkdirSync(path.join(d, ".git", "proteus"), { recursive: true });
+  fs.writeFileSync(path.join(d, ".git", "proteus", "journal.jsonl"), NEWER);
+  return d;
+};
+const keepOne = (...outs) => outs.flatMap(lines).filter((l) => /keep one\b.*then delete/.test(l));
+const prompts = (ls) => ls.map((l) => { try { return JSON.parse(l).prompt; } catch { return l; } }).join(" | ");
+function mergedJournal(repo, how) {
+  const got = lines(read(repo, ".git", "proteus", "journal.jsonl"));
+  ok(`journal split (${how}): .git/hive/journal.jsonl is gone`, !exists(repo, ".git", "hive", "journal.jsonl"), prompts(lines(read(repo, ".git", "hive", "journal.jsonl"))));
+  ok(`journal split (${how}): .git/proteus/journal.jsonl holds every line of both files, each exactly once`,
+    got.length === MERGED.length && MERGED.every((l) => got.filter((x) => x === l).length === 1), prompts(got));
+  ok(`journal split (${how}): the legacy lines come first, then the new ones, each file in its own order`, JSON.stringify(got) === JSON.stringify(MERGED), prompts(got));
+}
+function recallsBoth(repo, home, how) {
+  const s = sessionStart(repo, home, "compact");
+  const said = s.out.slice(Math.max(0, s.out.indexOf("human said")));
+  ok(`journal split (${how}): compaction recall surfaces a prompt from each file`, /human said/.test(s.out) && said.includes(PROMPT) && said.includes(NEW_PROMPT), said.slice(0, 600) || s.err);
+}
+{
+  // through the session start, with the new hooks an auto-update synced and no installer run
+  const JA = splitRepo("journal-autostart");
+  const HJ = fakeHome("journal-autostart");
+  newHooks(JA);
+  quiet(HJ);
+  const s1 = sessionStart(JA, HJ, "startup");
+  mergedJournal(JA, "autostart");
+  recallsBoth(JA, HJ, "autostart");
+  const both = () => [read(JA, ".git", "proteus", "journal.jsonl"), read(JA, ".git", "hive", "journal.jsonl")];
+  const once = both();
+  const s2 = sessionStart(JA, HJ, "startup");
+  ok("journal split (autostart): a second session start changes neither journal", JSON.stringify(both()) === JSON.stringify(once), both().map((t) => prompts(lines(t))).join(" || "));
+  const d = run(path.join(SRC, "install.js"), JA, HJ, ["--doctor"]);
+  ok("journal split (autostart): neither the session start nor --doctor says to keep one journal and delete the other", !keepOne(s1.out, s2.out, d.out).length, keepOne(s1.out, s2.out, d.out).join(" | "));
+}
+{
+  // through install.js --project
+  const JP = splitRepo("journal-project");
+  const HP = fakeHome("journal-project");
+  const r1 = run(path.join(SRC, "install.js"), JP, HP, ["--project"]);
+  ok("journal split (--project): install.js --project exits 0", r1.code === 0, r1.out + r1.err);
+  mergedJournal(JP, "--project");
+  quiet(HP);
+  recallsBoth(JP, HP, "--project");
+  const before = snapshot(JP);
+  const r2 = run(path.join(SRC, "install.js"), JP, HP, ["--project"]);
+  const after = snapshot(JP);
+  const diff = [...after.filter((x) => !before.includes(x)).map((x) => `+${x}`), ...before.filter((x) => !after.includes(x)).map((x) => `-${x}`)];
+  ok("journal split (--project): a second --project exits 0 and changes nothing", r2.code === 0 && !diff.length, `${r2.code} ${diff.slice(0, 6).join(" | ")}`);
+  const d = run(path.join(SRC, "install.js"), JP, HP, ["--doctor"]);
+  ok("journal split (--project): neither --project nor --doctor says to keep one journal and delete the other", !keepOne(r1.out, r1.err, r2.out, r2.err, d.out).length, keepOne(r1.out, r1.err, r2.out, r2.err, d.out).join(" | "));
+}
+
+// ---- Codex root at session start (PR #16 review): an auto-update leaves writable_roots without ../<repo>-proteus. The
+// next session start adds that root and nothing else, or prints the one command that finishes the move.
+{
+  const LX = legacyRepo("codex-autostart");
+  const HX = fakeHome("codex-autostart");
+  const cxEnv = { CODEX_HOME: path.join(HX, ".codex") };
+  fs.mkdirSync(cxEnv.CODEX_HOME);
+  newHooks(LX, [".codex", "hooks"], [".agents", "skills", "proteus"]);
+  quiet(HX);
+  const before = [`${LX}-hive`, "/opt/tools"];
+  fs.writeFileSync(path.join(LX, ".codex", "config.toml"), `[sandbox_workspace_write]\nwritable_roots = [${before.map((x) => JSON.stringify(x)).join(", ")}]\n`);
+  const s = run(path.join(LX, ".codex", "hooks", "proteus-autostart.js"), LX, HX, [], { hook_event_name: "SessionStart", source: "startup", session_id: "cx-startup", cwd: LX }, cxEnv);
+  const text = read(LX, ".codex", "config.toml") || "";
+  const roots = tomlRoots(text);
+  const added = Array.isArray(roots) && roots.includes(`${LX}-proteus`);
+  const hint = lines(s.out).some((l) => /install\.js"? --update\b|install\.ps1"? -Update\b/.test(l));
+  ok("codex root at session start: ../<repo>-proteus is added to writable_roots, or the output names install.js --update / install.ps1 -Update",
+    added || hint, `${text.trim()} :: ${lines(s.out).filter((l) => /proteus:|writable|codex|update/i.test(l)).join(" | ").slice(0, 400) || s.err}`);
+  ok("codex root at session start: config.toml stays valid TOML, keeps the user's root and gains no root but ../<repo>-proteus",
+    Array.isArray(roots) && roots.includes("/opt/tools") && roots.every((x) => x === `${LX}-proteus` || before.includes(x)), text);
+}
+
+// ---- Codex TOML (PR #16 review, debt 1): an existing root whose string holds `#` still gets the -proteus root beside it,
+// comma-separated; a regression check, base (hive/pi) writes it correctly
+{
+  const LH = legacyRepo("codex-hash", { open: false });
+  const HH = fakeHome("codex-hash");
+  fs.mkdirSync(path.join(LH, ".codex"), { recursive: true });
+  fs.writeFileSync(path.join(LH, ".codex", "config.toml"), "[sandbox_workspace_write]\nwritable_roots = [\"/opt/a,#\"]\n");
+  const r = run(path.join(SRC, "install.js"), LH, HH, ["--project", "--harness", "codex"], "", { CODEX_HOME: path.join(HH, ".codex") });
+  const text = read(LH, ".codex", "config.toml") || "";
+  const roots = tomlRoots(text);
+  ok("codex toml: with a root \"/opt/a,#\", writable_roots stays an array of comma-separated strings", r.code === 0 && Array.isArray(roots), `${r.code} ${text}`);
+  ok("codex toml: it keeps \"/opt/a,#\" and adds ../<repo>-proteus", Array.isArray(roots) && roots.includes("/opt/a,#") && roots.includes(`${LH}-proteus`), JSON.stringify(roots));
+}
+
+// ---- robust --project (PR #16 review, debt 5): an entry the listing saw but lstat cannot reach (as when a concurrent
+// migration moved it) must not abort --project. Simulated with a legacy dir that can be listed but not searched (r--).
+if (process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0)) {
+  console.log("skipped robust --project: needs POSIX permissions and a non-root user");
+} else {
+  const LU = legacyRepo("unreadable");
+  const HU = fakeHome("unreadable");
+  const hs = path.join(LU, ".git", "hive", "scratch"), key = `${RUN}-3`;
+  fs.mkdirSync(path.join(hs, key), { recursive: true });
+  fs.writeFileSync(path.join(hs, key, "render.bin"), "legacy scratch\n");
+  fs.mkdirSync(path.join(LU, ".git", "proteus", "scratch", key), { recursive: true }); // on both sides: the walk descends
+  let r;
+  fs.chmodSync(hs, 0o444);
+  try { r = run(path.join(SRC, "install.js"), LU, HU, ["--project"]); } finally { fs.chmodSync(hs, 0o755); }
+  ok("robust --project: a .git/hive entry that vanishes between the listing and the lstat does not abort install.js --project", r.code === 0, `${r.code} ${r.err.slice(-400)}`);
+  ok("robust --project: the rest still runs: hooks installed, the journal moved byte for byte",
+    exists(LU, ".claude", "hooks", "proteus-autostart.js") && read(LU, ".git", "proteus", "journal.jsonl") === JOURNAL, `${r.out.slice(-300)} ${r.err.slice(-300)}`);
+  const d = run(path.join(SRC, "install.js"), LU, HU, ["--doctor"]);
+  ok("robust --project: the unreached entry is kept, not lost, and --doctor names what stays in .git/hive",
+    [hs, path.join(LU, ".git", "proteus", "scratch")].some((s) => read(s, key, "render.bin") === "legacy scratch\n") && (!exists(LU, ".git", "hive") || doctorNames(d.out)),
+    d.out.split("\n").filter((l) => /hive/.test(l)).join(" | "));
+}
+
+// ---- scratch worktree (PR #16 review, debt 4): a worktree registered under .git/hive/scratch/<key>/wt stays a live,
+// registered worktree after the migration (left in place, or moved and repaired), and a sweep that prunes keeps it
+{
+  const LW = legacyRepo("scratch-wt");
+  const HW = fakeHome("scratch-wt");
+  const tail = path.join("scratch", `${RUN}-3`, "wt");
+  const live = path.join(LW, ".git", "hive", tail);
+  fs.mkdirSync(path.dirname(live), { recursive: true });
+  g(LW, "worktree", "add", "-q", "--detach", live);
+  const r = run(path.join(SRC, "install.js"), LW, HW, ["--project"]);
+  const list = () => g(LW, "worktree", "list", "--porcelain");
+  // the live worktree's registered path, when git still has it and its .git file is there
+  const liveAt = () => {
+    const p = lines(list()).filter((l) => l.startsWith("worktree ")).map((l) => l.slice(9)).find((x) => x.endsWith(tail));
+    return p && fs.existsSync(path.join(p, ".git")) ? p : "";
+  };
+  ok("scratch worktree (5): after --project, git worktree list shows the scratch worktree registered and not prunable", r.code === 0 && !!liveAt() && !/^prunable\b/m.test(list()), `${r.code} ${list().replace(/\n/g, " | ")}`);
+  // a done key's worktree in the new scratch: sweeping it runs `git worktree prune`
+  const gone = path.join(LW, ".git", "proteus", "scratch", "gone", "wt");
+  fs.mkdirSync(path.dirname(gone), { recursive: true });
+  g(LW, "worktree", "add", "-q", "--detach", gone);
+  const sw = run(path.join(SRC, "templates", "hooks", "proteus-scratch.js"), LW, HW, ["--sweep", "gone"]);
+  ok("scratch worktree (5) fixture: the sweep removed the done key's worktree, so it ran git worktree prune", !fs.existsSync(gone), sw.out + sw.err);
+  const at = liveAt();
+  let inside = "";
+  try { inside = at ? g(at, "rev-parse", "--is-inside-work-tree") : ""; } catch {}
+  ok("scratch worktree (5): after the sweep the live worktree is still registered, not prunable, and usable", !!at && inside === "true" && !/^prunable\b/m.test(list()), list().replace(/\n/g, " | "));
 }
 
 summary();
