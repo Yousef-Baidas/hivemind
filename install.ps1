@@ -20,7 +20,7 @@ foreach ($s in @("hivemind", "hivemind-review")) {
     if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
     Copy-Item -Recurse (Join-Path $Here "skills\$s") $Dest
 }
-Get-ChildItem (Join-Path $Base "agents") -Filter "hive-*.md" -ErrorAction SilentlyContinue | Remove-Item -Force
+# overwrite only what ships; local hive-*.md agents (per-repo profiles) survive
 Copy-Item (Join-Path $Here "agents\hive-*.md") (Join-Path $Base "agents")
 Write-Host "skills   -> $Base\skills\{hivemind,hivemind-review}"
 Write-Host "agents   -> $Base\agents\hive-*.md"

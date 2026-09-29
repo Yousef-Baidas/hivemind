@@ -30,7 +30,7 @@ for s in hivemind hivemind-review; do
   rm -rf "$BASE/skills/$s"
   cp -R "$HERE/skills/$s" "$BASE/skills/$s"; rm -rf "$BASE/skills/$s/.impeccable"
 done
-rm -f "$BASE"/agents/hive-*.md
+# overwrite only what ships; local hive-*.md agents (per-repo profiles) survive
 cp "$HERE"/agents/hive-*.md "$BASE/agents/"
 echo "skills   -> $BASE/skills/{hivemind,hivemind-review}"
 echo "agents   -> $BASE/agents/hive-*.md"
