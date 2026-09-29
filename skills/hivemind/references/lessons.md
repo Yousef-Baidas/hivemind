@@ -24,13 +24,13 @@ Why: the GUI falls back to the active view; background mode does not.
 ```
 
 - `trigger`: a JavaScript regex, case-insensitive. Specific enough to fire on the problem and not on every command; test it against the text that showed the failure.
-- `on`: which text is tested: `command` (a Bash command about to run), `output` (Bash output after it ran), `prompt` (a human message), `path` (a file about to be read or edited).
+- `on`: which text is tested: `command` (a shell command about to run), `output` (shell output after it ran), `prompt` (a human message), `path` (a file about to be read or edited).
 - `scope`: `lead`, `worker`, or `all`.
 - Body: symptom, fix, why. Five lines at most. Name the command or file, not the story.
 
 ## How recall works
 
-`hive-lessons.js` runs on Bash, file access, and human messages, in the lead and in every worker worktree. On a trigger match it injects the lesson once per session, two at most per event, and counts the hit in `.git/hive/lesson-hits.json`. Workers get lessons without the lead passing them.
+`hive-lessons.js` runs on shell calls, file access, and human messages, in the lead and in every worker worktree. On a trigger match it injects the lesson once per session, two at most per event, and counts the hit in `.git/hive/lesson-hits.json`. Workers get lessons without the lead passing them.
 
 ## At step 8 (close)
 

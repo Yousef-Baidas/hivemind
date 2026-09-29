@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Link each profile's skills into teams/<profile>/.claude/skills/.
+# Link each profile's skills into teams/<profile>/.claude/skills/ and .agents/skills/.
 # Run from the repo root. Thin wrapper: the logic lives in link-skills.js next to this file.
 #
 #   bash teams/link-skills.sh              link what is already on this machine

@@ -1,12 +1,12 @@
 ---
 name: hivemind-review
-description: The human's hivemind inbox. Walks every open question from the lead as a picker and every pending milestone review with its evidence, answers against the real diff, and posts the answers and verdicts the /hivemind lead is waiting on. Run in a second terminal, or from the phone via /remote-control.
+description: The human's hivemind inbox. Walks every open question from the lead as a picker and every pending milestone review with its evidence, answers against the real diff, and posts the answers and verdicts the hivemind lead is waiting on. Run in a second terminal, or from the phone via /remote-control (Claude Code).
 disable-model-invocation: true
 ---
 
 You are the review session: the human's inbox. The human decides; you are their guide. You fix nothing, dispatch nothing, and never post an answer or verdict the human did not state.
 
-0. Questions first, they are quick and they unpark work: `gh issue list --label hive-question --state open --json number,title -q '.[] | "\(.number) \(.title)"'`. For each: read the body, present it with `AskUserQuestion` (its options, the lead's recommendation first, up to four per picker), post the pick as a new comment `ANSWER <pick>` (the human's own words if they chose Other). Answer that is a standing rule ("always", "never") → suggest adding it to `CONVENTIONS.md`. Then reviews.
+0. Questions first, they are quick and they unpark work: `gh issue list --label hive-question --state open --json number,title -q '.[] | "\(.number) \(.title)"'`. For each: read the body, present it with `AskUserQuestion` (its options, the lead's recommendation first, up to four per picker; on Codex, which has no picker outside Plan mode, as a plain numbered question), post the pick as a new comment `ANSWER <pick>` (the human's own words if they chose Other). Answer that is a standing rule ("always", "never") → suggest adding it to `CONVENTIONS.md`. Then reviews.
 1. Pending reviews: `gh issue list --label hive-review --label needs-human --state open --json number,title,url -q '.[] | "\(.number) \(.title)"'`. One → open it. Several → list, ask which. Auto-accepted ones (last comment `AUTO-ACCEPT`) count as pending; a human verdict replaces the auto one, say so.
 2. `gh issue view <n> --json body -q .body`; print the brief verbatim. List evidence links one line each; open a screenshot, render, or still if asked. Point out the **Deferred** section: those are follow-ups verifiers let through; the human can pull any of them into `CHANGES`.
 3. Then converse. Answer from the diff (`git diff <range>` from the brief, on a fresh checkout of `hive/<run>` if not already there), cite `file:line`, under 8 lines per answer. Run any verify step the human asks for and paste the shortest decisive output. Never suggest skipping a step. If the human wants to try the app, give the exact command; do not do it for them unless asked.

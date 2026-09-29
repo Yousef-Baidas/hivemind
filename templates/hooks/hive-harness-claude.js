@@ -170,6 +170,10 @@ const home = path.join(os.homedir(), ".claude");
 const skillDirs = (root) => [path.join(root, ".claude", "skills", "hivemind"), path.join(home, "skills", "hivemind")];
 const agentsDir = path.join(home, "agents");
 const hooksDir = (root) => path.join(root, ".claude", "hooks");
+// loaded once a worker reads a file in the team folder
+const teamSkills = (team) => path.join(team, ".claude", "skills");
+// every template file lands in hooksDir (existing repos' gates name .claude/hooks/commit-msg.js)
+const skipHooks = [];
 // a shipped agent as this CLI keeps it: {name, text}, or null to skip it
 const agentFile = (file, text) => ({ name: path.basename(file), text });
 const leadSettings = (root) => path.join(root, ".claude", "settings.local.json");
@@ -254,5 +258,5 @@ const ownedFile = (wt) => path.join(wt, ".claude", "hive-owned");
 module.exports = {
   name, bypass, models, projectRoot, event, deny, context, keepGoing,
   contextTokens, lastAssistantText, lastHumanPrompt, sessionModel,
-  home, skillDirs, agentsDir, hooksDir, agentFile, contextModeOn, registerLead, prepareWorker, ownedFile, LEAD_HOOKS,
+  home, skillDirs, agentsDir, hooksDir, teamSkills, skipHooks, agentFile, contextModeOn, registerLead, prepareWorker, ownedFile, LEAD_HOOKS,
 };

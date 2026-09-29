@@ -1,10 +1,10 @@
 # Teams
 
-A team is a folder `teams/<team>/` holding `PROFILE.md` (role, owns, rules, green additions, verifier checklist), optionally `CRAFT.md` (the team's research-backed playbook), `skills.txt`, `required.txt`, and `.claude/skills/` (that team's skills, linked by `teams/link-skills.js`). Claude Code loads a nested `.claude/skills/` only when an agent first reads a file in that folder. Workers and verifiers read `teams/<team>/PROFILE.md` as their first action; the lead never reads anything under `teams/` except `ROUTING.md`. So team skills and playbooks cost the lead nothing, not even their descriptions.
+A team is a folder `teams/<team>/` holding `PROFILE.md` (role, owns, rules, green additions, verifier checklist), optionally `CRAFT.md` (the team's research-backed playbook), `skills.txt`, `required.txt`, and `.claude/skills/` plus `.agents/skills/` (that team's skills, linked into both by `teams/link-skills.js`). Claude Code loads a nested `.claude/skills/` only when an agent first reads a file in that folder. Codex never loads them (a spawned worker keeps the lead's cwd), so a Codex worker lists `teams/<team>/.agents/skills/` after `PROFILE.md` and reads each fitting `<name>/SKILL.md` itself, resolving its relative references from that skill's folder. Workers and verifiers read `teams/<team>/PROFILE.md` as their first action; the lead never reads anything under `teams/` except `ROUTING.md`. So team skills and playbooks cost the lead nothing, not even their descriptions.
 
 ## Agents
 
-Two generic agents serve every team: `hive-worker` and `hive-verifier`. The lead names the team in the prompt; the agent reads that team's `PROFILE.md`, then `CRAFT.md` if it exists, then `CONVENTIONS.md`. The software defaults also ship as named agents (`hive-frontend-worker`, `hive-backend-verifier`, …) with the team preset. A project that wants a team-specific agent (different tools, a pinned model) adds `.claude/agents/hive-<team>-worker.md` to its own repo; the lead prefers it over the generic one. No supervisor sits between the lead and a team. Adding one adds a hop and a context window and removes nothing.
+Two generic agents serve every team: `hive-worker` and `hive-verifier`. The lead names the team in the prompt; the agent reads that team's `PROFILE.md`, then `CRAFT.md` if it exists, then `CONVENTIONS.md`. The software defaults also ship as named agents (`hive-frontend-worker`, `hive-backend-verifier`, …) with the team preset. A project that wants a team-specific agent (different tools, a pinned model) adds `.claude/agents/hive-<team>-worker.md` to its own repo (Codex: a TOML role, no model, no tool limits, `harnesses.md`); the lead prefers it over the generic one. No supervisor sits between the lead and a team. Adding one adds a hop and a context window and removes nothing.
 
 Cross-cutting agents, every domain: `hive-security-verifier` (second verifier on auth, input parsing, secrets, file or network I/O, money, personal data, anything published), `hive-qa-verifier` (once per wave on `hive/<run>`, deep per milestone and at close), `hive-guide` (human-review brief), `hive-scout` (designs the roster and picks skills at bootstrap).
 
@@ -33,7 +33,7 @@ Per team, `teams/<team>/skills.txt`, one `<owner/repo> <skill-name>` per line, r
 
 `teams/<team>/required.txt`, same format, is the pipeline's: `install-anti-slop` for devops on code, `thermo-nuclear-code-quality-review` for qa on code. The scout never rewrites it, it does not count against the eight, and `install.js --project` refreshes it. A missing required skill stops the run.
 
-Models, from the ladder (`models=` in `hive-state`): workers are `mid` (`standard`) or `top` (`hard`); team and security verifiers are `top`; the scout is `top`; QA is `mid` per wave, `top` per milestone and at close; the guide is `mid`. On a Sonnet lead both are Sonnet; nothing runs above the lead, and a once-per-project model (Fable by default) is only ever the lead.
+Models, from the ladder (`models=` in `hive-state`): workers are `mid` (`standard`) or `top` (`hard`); team and security verifiers are `top`; the scout is `top`; QA is `mid` per wave, `top` per milestone and at close; the guide is `mid`. On a Sonnet lead both are Sonnet; nothing runs above the lead, and a once-per-project model (Fable by default) is only ever the lead. With no ladder (`models=unknown`, Codex by default) every role runs on the lead's model.
 
 ## Routing
 
@@ -43,7 +43,7 @@ Models, from the ladder (`models=` in `hive-state`): workers are `mid` (`standar
 
 ## Confinement
 
-`~/.claude/skills/` loads in every session, lead included. To keep a domain skill out of the lead entirely, it must live only under `teams/<team>/.claude/skills/`. `--confine` removes the global link for every skill it linked into a team (links only; real directories are left alone). The lead keeps: hivemind, the mattpocock skills, caveman, ponytail, rtk, context-mode, graphify.
+`~/.claude/skills/` loads in every session, lead included. To keep a domain skill out of the lead entirely, it must live only under the team's folder. `--confine` removes the global link for every skill it linked into a team (links only; real directories are left alone). On Codex `~/.agents/skills/` loads for the lead too and `--confine` cannot hide team skills from it. The lead keeps: hivemind, the mattpocock skills, caveman, ponytail, rtk, context-mode, graphify.
 
 Bootstrap is the one exception: the scaffold worker may read several teams' `PROFILE.md` to set up checks for each.
 

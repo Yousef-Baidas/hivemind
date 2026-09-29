@@ -1,6 +1,6 @@
 # Docs diet
 
-Root docs are loaded into every session of every agent. Each line there is paid for on every turn, and the model's attention thins as they grow. A 1,000-line `CLAUDE.md` plus a `CLAUDE_1.md` is a project that stopped deciding what matters.
+Root docs (`CLAUDE.md` on Claude Code, `AGENTS.md` on both) are loaded into every session of every agent. Each line there is paid for on every turn, and the model's attention thins as they grow. A 1,000-line `CLAUDE.md` plus a `CLAUDE_1.md` is a project that stopped deciding what matters.
 
 ## Budget
 
@@ -15,7 +15,7 @@ When `doc-bloat` is not `none`, the lead files one ticket (profile: the team tha
 | The line is… | It goes to |
 |---|---|
 | a rule every agent needs on every task | stays in the root doc, shortened |
-| true only for one directory or subsystem | a nested `CLAUDE.md` in that directory (loaded only when an agent works there) |
+| true only for one directory or subsystem | a nested `CLAUDE.md` in that directory (loaded only when an agent works there; Codex reads `AGENTS.md` only from the repo root down to the session's cwd, and a subagent's cwd is the lead's, so there a lesson with a `path` trigger) |
 | a fix for a problem that shows up under a recognisable command, error, or path | a lesson in `docs/lessons/` with a trigger (`lessons.md`) |
 | a decision with its reasons | an ADR in `docs/adr/` |
 | a domain term | `CONTEXT.md` |

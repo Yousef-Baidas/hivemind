@@ -48,7 +48,7 @@ Old route returns 410 after that date.
 
 ## Enforcement
 
-Set this once in `~/.claude/settings.json` so the harness stops offering the trailer at all:
+Claude Code: set this once in `~/.claude/settings.json` so the harness stops offering the trailer at all (Codex has no such setting; the commit-msg hook is the gate):
 
 ```json
 {

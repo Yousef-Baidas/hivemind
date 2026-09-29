@@ -25,5 +25,5 @@ jobs:
       - name: commit messages
         run: |
           for c in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
-            git log -1 --format=%B "$c" > /tmp/msg && node .claude/hooks/commit-msg.js /tmp/msg || exit 1
+            git log -1 --format=%B "$c" > /tmp/msg && node teams/templates/hooks/commit-msg.js /tmp/msg || exit 1
           done

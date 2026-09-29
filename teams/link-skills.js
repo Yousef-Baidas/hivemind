@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Link each profile's skills into teams/<profile>/.claude/skills/.
-// Run from the repo root. Copied here by hivemind's install.js --project
+// Link each profile's skills into teams/<profile>/.claude/skills/ (Claude Code) and
+// teams/<profile>/.agents/skills/ (Codex), so one repo serves both CLIs. Run from the repo root. Copied here by hivemind's install.js --project
 // (link-skills.sh and link-skills.ps1 are thin wrappers); hive-scout re-runs it after
 // rewriting a skills.txt.
 //
@@ -28,6 +28,10 @@ const WIN = process.platform === "win32";
 const HOME = os.homedir();
 // hivemind's own global links; never confined
 const OURS = new Set(["hivemind", "hivemind-review"]);
+// Claude Code loads a team's .claude/skills once a worker reads a file in the team folder. Codex
+// loads .agents/skills only between the repo root and the session cwd, and a spawned subagent
+// keeps the lead's cwd, so a Codex worker opens <team>/.agents/skills/<name>/SKILL.md itself.
+const SKILL_DIRS = [path.join(".claude", "skills"), path.join(".agents", "skills")];
 
 function lstat(p) { try { return fs.lstatSync(p); } catch { return null; } }
 function real(p) { try { return fs.realpathSync(p); } catch { return null; } }
@@ -106,8 +110,7 @@ function run({ root = process.cwd(), install = false, confine = false, relock = 
     const dir = path.join(teams, p);
     const lists = listFiles(dir);
     if (!lists.length) continue;
-    const skillsDir = path.join(dir, ".claude", "skills");
-    fs.mkdirSync(skillsDir, { recursive: true });
+    for (const d of SKILL_DIRS) fs.mkdirSync(path.join(dir, d), { recursive: true });
     let n = 0;
     for (const [source, name] of lists.flatMap(readList)) {
       if (!name) { console.error(`teams/${p}: line needs '<owner/repo> <skill>': ${source}`); continue; }
@@ -118,10 +121,9 @@ function run({ root = process.cwd(), install = false, confine = false, relock = 
         src = findSrc(name);
       }
       if (!src) { missing.push(`${p}: npx skills add ${source} --skill ${name} -g -y`); continue; }
-      if (!linkDir(src, path.join(skillsDir, name))) {
-        console.error(`teams/${p}/.claude/skills/${name} is a real directory, not a link; left alone`);
-        continue;
-      }
+      const blocked = SKILL_DIRS.filter((d) => !linkDir(src, path.join(dir, d, name)));
+      for (const d of blocked) console.error(`teams/${p}/${d.split(path.sep).join("/")}/${name} is a real directory, not a link; left alone`);
+      if (blocked.length === SKILL_DIRS.length) continue;
       n++;
       linked.push({ name, source, src });
       const g = path.join(HOME, ".claude", "skills", name);
@@ -158,7 +160,7 @@ function run({ root = process.cwd(), install = false, confine = false, relock = 
   return { linked: linked.length, missing: missing.length };
 }
 
-module.exports = { WIN, lstat, real, isDir, isFile, samePath, removeLink, linkDir, readList, listFiles, profiles, hashDir, run };
+module.exports = { WIN, SKILL_DIRS, lstat, real, isDir, isFile, samePath, removeLink, linkDir, readList, listFiles, profiles, hashDir, run };
 
 if (require.main === module) {
   const opt = {};

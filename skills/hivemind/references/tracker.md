@@ -2,7 +2,7 @@
 
 hivemind keeps no state in the repo. Tickets, milestones, the run log, maps, worker reports, verdicts, debt, review briefs, and the review queue live in the tracker. The repo gets deliverables, checks, contracts, lessons, ADRs, and the three docs a human would want anyway: `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`. Nothing else. `teams/` is config, shared like lint config. Agent memory is `local` (git-ignored); hook state is under `.git/hive/`, never committed.
 
-The Agent Teams task list is a runtime mirror; if it and the tracker disagree, the tracker wins. A session that dies loses nothing.
+The lead's task list (Claude Code's Agent Teams list; on Codex the agents it spawned) is a runtime mirror; if it and the tracker disagree, the tracker wins. A session that dies loses nothing.
 
 Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the second column; the operations do not change.
 
@@ -34,7 +34,7 @@ Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the secon
 | learned | still `AGENTS.md ## Learned`; that file is for the next human too |
 | close run | PR `hive/<run>` → `main`, body links the milestones; `gh api -X DELETE "repos/{owner}/{repo}/branches/hive%2F<run>/protection"` then `git push origin --delete hive-evidence/<run>` after merge |
 
-Verdict poll, background shell, exits on the first verdict comment:
+Verdict poll, background shell, exits on the first verdict comment (Codex cannot run it: `harnesses.md`):
 
 ```
 until v=$(gh issue view <n> --json comments -q '[.comments[].body | select(test("^(ACCEPT|CHANGES|AUTO-ACCEPT|AUTO-HOLD)"))] | last' 2>/dev/null) && [ -n "$v" ] && [ "$v" != null ]; do sleep 30; done; echo "$v"

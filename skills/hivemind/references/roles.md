@@ -1,20 +1,24 @@
 # Role prompts. Fill <> and paste. Nothing else.
 
-Every worker and verifier prompt ends with the three rules below; the agent files repeat them, and the hooks enforce the first and back up the third.
+`<hooks>` is `.claude/hooks`, `.codex/hooks` on Codex; spawn, model and stop names per `harnesses.md`.
 
-- **Long jobs**: foreground Bash with `timeout` up to 600000 ms, or a detached job (`nohup … &`) whose PID or log you poll in this same turn until it ends. Never `run_in_background`, never `Monitor`, never end a turn waiting on a notification; nothing wakes you.
+Every worker and verifier prompt ends with the three rules below; the agent files repeat them, and the hooks enforce the first (not on Codex, whose hooks cannot see a background shell) and back up the third.
+
+- **Long jobs**: a foreground shell call with a timeout up to 10 minutes, or a detached job (`nohup … &`) whose PID or log you poll in this same turn until it ends (Codex: a command still running when the shell call returns is polled with `write_stdin` until it exits, in this same turn). Never a background shell or a watcher (`run_in_background`, `Monitor`), never end a turn waiting on a notification; nothing wakes you.
 - **Report once**: the full report goes on the tracker once (issue comment or PR review). Your final turn text is one line: `DONE #<n> sent`, `VERDICT #<n> sent`, `RED #<n> sent`, `NEEDS #<n> sent`, `BLOCKED #<n> <why>`. Then stop.
-- **Scratch**: temp files, renders, clones and inspection worktrees go in `$(node .claude/hooks/hive-scratch.js --path <key>)`, never a bare `/tmp` or `mktemp`. The key is the ticket's `<run>-<id>`, or `<run>` for contracts, QA and the guide; the lead deletes it at merge or close.
+- **Scratch**: temp files, renders, clones and inspection worktrees go in `$(node <hooks>/hive-scratch.js --path <key>)`, never a bare `/tmp` or `mktemp`. The key is the ticket's `<run>-<id>`, or `<run>` for contracts, QA and the guide; the lead deletes it at merge or close.
 
 A brief carries pointers (issue, `file:line`, command), never raw logs or long output; the agent reads those through context-mode.
 
 ## Worker
 ```
-Ticket #<n> (gh issue view <n> --json body -q .body), team <team>, worktree <path>, branch hive/<run>-<id>, scratch key <run>-<id>. Nothing outside this ticket exists.
+Ticket #<n> (gh issue view <n> --json body -q .body), team <team>, worktree <absolute path>, branch hive/<run>-<id>, scratch key <run>-<id>. Nothing outside this ticket exists.
+Work only in the worktree: every shell call runs with it as the working directory (the shell tool's workdir where it has one), every command starts with the tool it runs (`git commit …`, never `cd <wt> && git …` or `git -C`), every edit names a path under it.
 Contract (committed, don't change it): <file:line pointers>
 Check: <file::name or command>
 You own: <paths>. Anything else is read-only and the edit hook refuses it; need it → `gh issue comment <n> --body "NEEDS <file>: <why>"` and stop. New package or tool → `NEEDS dependency <ecosystem>/<name>@<version>: <why>` and stop; never install one.
 Read teams/<team>/PROFILE.md first, teams/<team>/CRAFT.md if it exists, CONVENTIONS.md and the taste docs it names third. A rule in CONVENTIONS.md beats a rule in any skill.
+<Codex: after PROFILE.md, list teams/<team>/.agents/skills/ and read each fitting <name>/SKILL.md yourself; resolve its relative references from that skill's folder.>
 <needs-research: run /research first; primary sources; cite each one you relied on in the report.>
 Code: run /implement (drives /tdd at the seam, ends with /code-review). Otherwise: the team's procedure from PROFILE.md. Everything you produce is reproducible from the repo: scripts and source in owned paths, never a file only in out/, /tmp, or a GUI session. Probes print path, hash or size, and count of what they opened.
 Green = the check, the team's green adds, and every repo gate (<gate commands>) clean on owned paths.
@@ -26,7 +30,7 @@ Long jobs, report-once and scratch rules as above. CONTEXT.md vocabulary. Cavema
 
 ## Contracts worker (step 3, one per team in the wave, sequential)
 ```
-Run <run>, branch hive/<run>, team <team>, tickets #<n>, #<n>, …, scratch key <run>. No worktree, no PR.
+Run <run>, branch hive/<run>, team <team>, tickets #<n>, #<n>, …, scratch key <run>. No worktree, no PR. Every command starts with the tool it runs (`git commit …`, never `cd … && git …` or `git -C`).
 Per ticket: `gh issue view <n> --json body -q .body` holds the interface and the check (name, input, expected result). Commit exactly those: code gets signature stubs that compile and throw/`todo!()`/`raise NotImplementedError` plus the red test; other deliverables get the check script and whatever stub makes it runnable. No behaviour, no helpers, no extras.
 Show each check red twice and paste both outputs on the issue:
  1. on the missing work: it fails on its assertion or the not-implemented stub, never on an import, type, syntax, or missing-file error;
@@ -73,4 +77,4 @@ Skills from skills.sh and installed plugins, ranked by installs and fit to this 
 ```
 
 ## Lead pre-dispatch check
-Every ticket is a tracker issue with milestone, `profile:<team>` from `ROUTING.md`, difficulty. Owned paths inside the team's `Owns`. Contract and check committed per ticket, each shown red twice. No shared file owners in this wave, no shared binary with two writers. Hotspot tickets merged. The Agent call names `top` or `mid` from `models=`; never a missing, higher, once-per-project, or under-floor model. `CONVENTIONS.md` exists and its taste docs are in the brief. The milestone's debt issue exists. No human review open. `hive/<run>` protected. Each worktree prepared by `hive-worktree.js`. Stall check armed. I produced no deliverable and resolved no conflict; every fix I decided went out as a ticket or a `BACK-TO-WORKER`.
+Every ticket is a tracker issue with milestone, `profile:<team>` from `ROUTING.md`, difficulty. Owned paths inside the team's `Owns`. Contract and check committed per ticket, each shown red twice. No shared file owners in this wave, no shared binary with two writers. Hotspot tickets merged. The spawn names `top` or `mid` from `models=` (your own model when `models=unknown`); never a missing, higher, once-per-project, or under-floor model. `CONVENTIONS.md` exists and its taste docs are in the brief. The milestone's debt issue exists. No human review open. `hive/<run>` protected. Each worktree prepared by `hive-worktree.js`. Stall check armed. I produced no deliverable and resolved no conflict; every fix I decided went out as a ticket or a `BACK-TO-WORKER`.

@@ -5,7 +5,7 @@ Every worker works to `CONVENTIONS.md` at the repo root; every verifier checks t
 ## Interview (bootstrap, once)
 
 1. Mid-project: spawn `hive-backend-worker` on `mid` with: "Draft `CONVENTIONS.md` from evidence only: linter and formatter configs, three representative source files per language, test file names, commit log style. Mark every rule `observed` or `guess`. No opinions." Blank repo: skip, all rules are open.
-2. Ask the human, `AskUserQuestion`, in batches of at most four, only what the draft left as `guess` or open. Checklist:
+2. Ask the human, `AskUserQuestion` (Codex: plain numbered questions), in batches of at most four, only what the draft left as `guess` or open. Checklist:
    - naming: files, directories, variables, functions, types, constants, DB tables/columns, env vars, branch names
    - layout: feature folders vs layers, where tests live, barrel files yes/no, max file length
    - style: formatter and its config, semicolons/quotes/trailing commas or the language equivalent, import order, line width

@@ -140,6 +140,7 @@ function tourState(home, cfg) {
 }
 
 // agents and hooks to where the harness keeps them, only when bytes differ; never deletes
+// (install-lead-hooks removes the files the adapter skips)
 function sync(ad, home, root, notes) {
   let n = 0;
   let hooks = 0;
@@ -152,7 +153,7 @@ function sync(ad, home, root, notes) {
   }
   const hooksSrc = path.join(home, "templates", "hooks");
   for (const f of ls(hooksSrc)) {
-    if (f === "install-lead-hooks.js") continue; // the installer runs from the source, like install-lead-hooks does
+    if (f === "install-lead-hooks.js" || (ad.skipHooks || []).includes(f)) continue; // the installer runs from the source
     const s = path.join(hooksSrc, f);
     if (fs.statSync(s).isFile() && lib.syncFile(s, path.join(ad.hooksDir(root), f))) hooks++;
   }
@@ -228,7 +229,7 @@ function localState(ad, root, runs, home, behind) {
   const agents = read("AGENTS.md") + "\n" + read("CLAUDE.md"); // older installs keep ## Learned in CLAUDE.md
   const profiles = (() => { try { return fs.readdirSync(path.join(root, "teams"), { withFileTypes: true }).filter((e) => e.isDirectory() && fs.existsSync(path.join(root, "teams", e.name, "skills.txt"))).map((e) => e.name); } catch { return []; } })();
   const shipped = profiles.filter((p) => /shipped default/.test(read(`teams/${p}/skills.txt`).split("\n")[0]));
-  const unlinked = profiles.filter((p) => ls(path.join("teams", p, ".claude", "skills")).length === 0);
+  const unlinked = profiles.filter((p) => ls(ad.teamSkills(path.join("teams", p))).length === 0);
   // root agent docs over budget, and any CLAUDE_*.md / CLAUDE-*.md split at all
   const bloat = ls(".").filter((f) => /^(CLAUDE|AGENTS).*\.md$/.test(f)).map((f) => {
     const text = read(f);

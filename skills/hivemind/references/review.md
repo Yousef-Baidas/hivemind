@@ -15,8 +15,8 @@ Taste-driven runs (anything the human judges by eye or ear: a scene, an edit, a 
 Fires after the last ticket of a milestone merges into `hive/<run>` and QA says `WAVE-GREEN`.
 
 1. Spawn `hive-guide` with run, milestone, ticket numbers, diff range, QA verdict, gate commands, mode, debt issue. It opens the review issue `Review: <run>/<milestone>` (label `hive-review`, `needs-human`) with the brief, evidence links, and the open debt lines, so the human sees what was deferred, exits.
-2. `PushNotification`: `review ready: <milestone> — <issue url>`. Print the url and `HIVEMIND=0 claude → /hivemind-review` in a second terminal (or `/remote-control` from the phone).
-3. Wait: `Bash run_in_background`, the poll from `tracker.md`, until a verdict comment exists. Dispatch nothing. Idle context costs nothing.
+2. `PushNotification`: `review ready: <milestone> — <issue url>`. Print the url and `HIVEMIND=0 claude → /hivemind-review` in a second terminal (or `/remote-control` from the phone); on Codex `HIVEMIND=0 codex → $hivemind-review`.
+3. Wait: a background shell with the poll from `tracker.md` (Codex: `harnesses.md`), until a verdict comment exists. Dispatch nothing. Idle context costs nothing.
 4. Verdict comment, first line:
    - `ACCEPT` → remove `needs-human`, close review issue and milestone, next milestone. Last one → step 8.
    - `CHANGES` → every following line is a ticket via step 2 (contract, check, team, difficulty), one wave, milestone `<name>-r2`. Back to step 3; the gate fires again. When every line is a small tweak inside one team's paths, or the human asks to go faster, use revision mode instead (`operations.md`): same gate at the end, no improvised scripts outside git.
@@ -28,7 +28,7 @@ Any of these produce the verdict comment; the lead does not care which.
 
 | Channel | How |
 |---|---|
-| review session | second terminal, `HIVEMIND=0 claude --model sonnet`, `/hivemind-review` (`HIVEMIND=0` keeps the lead autostart and guard out of it). Fresh session with the issue, the diff, and the evidence; chats, runs steps on request, posts the verdict when told. Zero lead tokens. |
+| review session | second terminal, `HIVEMIND=0 claude --model sonnet`, `/hivemind-review` (Codex: `HIVEMIND=0 codex`, `$hivemind-review`; `HIVEMIND=0` keeps the lead autostart and guard out of it). Fresh session with the issue, the diff, and the evidence; chats, runs steps on request, posts the verdict when told. Zero lead tokens. |
 | phone | `/remote-control` on the review session, or the GitHub app: read the issue, comment `ACCEPT`. |
 | issue only | read the brief on GitHub, comment `ACCEPT` or `CHANGES` + lines. No AI involved. |
 | evidence only | open the linked screenshots, then comment. |

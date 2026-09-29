@@ -167,6 +167,11 @@ const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const skillDirs = (root) => [path.join(root, ".agents", "skills", "hivemind"), path.join(os.homedir(), ".agents", "skills", "hivemind")];
 const agentsDir = path.join(home, "agents");
 const hooksDir = (root) => path.join(root, ".codex", "hooks");
+// never loaded by a spawned worker (it keeps the lead's cwd): the worker reads the SKILL.md files
+const teamSkills = (team) => path.join(team, ".agents", "skills");
+// Claude Code only: the status line, a worker's settings.local.json, and the commit-msg check,
+// which the gates run from the committed teams/templates/hooks/ on every CLI
+const skipHooks = ["hive-statusline.js", "worktree-settings.local.json", "commit-msg.js"];
 
 // an agent file in Codex's TOML. Never a model: a role's model overrides the spawn's, and the
 // ladder picks the model per spawn. Tool limits do not carry over (roles cannot set them).
@@ -183,9 +188,40 @@ function agentFile(file, text) {
   };
 }
 
-// context-mode as an MCP server in the user's Codex config
+// config.toml as {"a\0b": {key: raw value}} per [a.b] table ("" is the root); enough for the
+// few keys read here, not a TOML parser
+function tomlTables(text) {
+  const out = { "": {} };
+  let cur = out[""];
+  for (const l of String(text).split(/\r?\n/)) {
+    if (/^\s*\[\[/.test(l)) { cur = {}; continue; } // an array of tables: nothing read here
+    const h = /^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$/.exec(l);
+    if (h) {
+      const k = [...h[1].matchAll(/\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*(?:\.|$)/g)].map((m) => m[2] ?? m[3] ?? m[1]).join("\0");
+      cur = out[k] = out[k] || {};
+      continue;
+    }
+    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.*?)\s*(#.*)?$/.exec(l);
+    if (kv) cur[kv[1]] = kv[2];
+  }
+  return out;
+}
+// The required context-mode, either as an MCP server ([mcp_servers.context-mode]) or as a plugin:
+// [plugins."context-mode@<marketplace>"] (enabled unless enabled = false) with a version installed
+// in $CODEX_HOME/plugins/cache/<marketplace>/context-mode/<version>/, and [features] plugins on.
 function contextModeOn() {
-  try { return /^\s*\[mcp_servers\.["']?context-mode["']?\]/m.test(fs.readFileSync(path.join(home, "config.toml"), "utf8")); } catch { return false; }
+  let t;
+  try { t = tomlTables(fs.readFileSync(path.join(home, "config.toml"), "utf8")); } catch { return false; }
+  const off = (tbl) => tbl.enabled === "false";
+  const mcp = t["mcp_servers\0context-mode"];
+  if (mcp && !off(mcp)) return true;
+  if (t.features && t.features.plugins === "false") return false;
+  return Object.keys(t).some((k) => {
+    const m = /^plugins\0context-mode@([^\0]+)$/.exec(k);
+    if (!m || off(t[k])) return false;
+    const dir = path.join(home, "plugins", "cache", m[1], "context-mode");
+    try { return fs.readdirSync(dir, { withFileTypes: true }).some((e) => e.isDirectory() && /^[A-Za-z0-9._+-]+$/.test(e.name)); } catch { return false; }
+  });
 }
 
 // [event, script, matcher, timeout s]; a matcher of only names and | is an exact-name list,
@@ -249,6 +285,71 @@ function registerLead(root) {
   return { file, changed };
 }
 
+// Worker worktrees live in ../<repo>-hive/, outside the project, where workspace-write rejects a
+// worker's apply_patch. The project's .codex/config.toml adds that folder to writable_roots; a
+// textual merge (no TOML parser here) that refuses any shape it cannot edit safely.
+// Returns {file, dir, created, changed, missing} or {file, dir, error}; write=false only checks.
+function sandboxRoots(root, write = true) {
+  const abs = path.resolve(root);
+  const dir = path.join(path.dirname(abs), `${path.basename(abs)}-hive`);
+  const file = path.join(abs, ".codex", "config.toml");
+  const entry = JSON.stringify(dir); // a JSON string is a TOML basic string
+  const table = `[sandbox_workspace_write]\nwritable_roots = [${entry}]\n`;
+  const refuse = (why) => ({ file, dir, error: `${file} ${why}; add ${dir} to writable_roots under [sandbox_workspace_write] yourself` });
+  let text = null;
+  try { text = fs.readFileSync(file, "utf8"); } catch {}
+  const done = (next, created) => {
+    if (!write) return { file, dir, missing: true };
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, next);
+    // bwrap drops a writable root that does not exist yet
+    fs.mkdirSync(dir, { recursive: true });
+    return { file, dir, created, changed: true };
+  };
+  if (text === null) return done(table, true);
+  // a multi-line string could hold a line that looks like a header
+  if (/"""|'''/.test(text)) return refuse("has a multi-line string");
+  const lines = text.split("\n");
+  const heads = [];
+  lines.forEach((l, i) => { if (/^\s*\[\s*sandbox_workspace_write\s*\]\s*(#.*)?\r?$/.test(l)) heads.push(i); });
+  if (heads.length > 1) return refuse("has [sandbox_workspace_write] twice");
+  // dotted keys or an inline table set the same table from elsewhere
+  if (lines.some((l, i) => !heads.includes(i) && /^\s*(\[\s*)?["']?sandbox_workspace_write["']?\s*[.=]/.test(l) && !/^\s*\[\s*sandbox_workspace_write\s*\.\s*\w/.test(l)))
+    return refuse("sets sandbox_workspace_write in a form this installer does not edit");
+  // keep the file's own line endings (a CRLF file stays CRLF)
+  const le = /\r\n/.test(text) ? "\r\n" : "\n";
+  if (!heads.length) return done(`${text}${text && !text.endsWith("\n") ? le : ""}${text.trim() ? le : ""}${table.replace(/\n/g, le)}`, false);
+  let end = heads[0] + 1;
+  while (end < lines.length && !/^\s*\[/.test(lines[end])) end++;
+  const k = lines.slice(heads[0] + 1, end).findIndex((l) => /^\s*["']?writable_roots["']?\s*=/.test(l));
+  if (k < 0) return done([...lines.slice(0, heads[0] + 1), `writable_roots = [${entry}]${le === "\r\n" ? "\r" : ""}`, ...lines.slice(heads[0] + 1)].join("\n"), false);
+  // scan the array: strings, commas, whitespace and comments only
+  const start = lines.slice(0, heads[0] + 1 + k).reduce((n, l) => n + l.length + 1, 0);
+  let i = text.indexOf("=", start) + 1;
+  while (/[ \t]/.test(text[i] || "")) i++;
+  if (text[i] !== "[") return refuse("sets writable_roots to something other than an array");
+  const vals = [];
+  let last = "[";
+  for (i++; i < text.length; i++) {
+    const c = text[i];
+    if (/\s/.test(c)) continue;
+    if (c === "#") { while (i < text.length && text[i] !== "\n") i++; continue; }
+    if (c === "]") break;
+    if (c === ",") { last = ","; continue; }
+    const m = c === '"' ? /^"((?:[^"\\\n]|\\.)*)"/.exec(text.slice(i)) : c === "'" ? /^'([^'\n]*)'/.exec(text.slice(i)) : null;
+    if (!m) return refuse("has a writable_roots value this installer cannot read");
+    let v = m[1];
+    if (c === '"') { try { v = JSON.parse(`"${v}"`); } catch {} }
+    vals.push(v); last = "v"; i += m[0].length - 1;
+  }
+  if (text[i] !== "]") return refuse("has an unterminated writable_roots array");
+  if (vals.some((v) => path.resolve(v) === dir)) {
+    if (write) fs.mkdirSync(dir, { recursive: true });
+    return { file, dir, created: false, changed: false };
+  }
+  return done(`${text.slice(0, i)}${last === "v" ? ", " : ""}${entry}${text.slice(i)}`, false);
+}
+
 // Subagents run in the lead's session under its hooks, which enforce owned paths; the copies
 // here are the backup for a codex session opened inside the worktree.
 const WORKER_HOOKS = ["hive-lib.js", "hive-harness.js", "hive-harness-claude.js", "hive-harness-codex.js", "hive-owned-paths.js", "hive-worker-guard.js", "hive-stall.js", "hive-lessons.js", "hive-scratch.js"];
@@ -265,6 +366,6 @@ const ownedFile = (wt) => path.join(wt, ".codex", "hive-owned");
 module.exports = {
   name, bypass, models, projectRoot, event, deny, context, keepGoing,
   contextTokens, lastAssistantText, lastHumanPrompt, sessionModel,
-  home, skillDirs, agentsDir, hooksDir, agentFile, contextModeOn, registerLead, prepareWorker, ownedFile, LEAD_HOOKS,
-  patchPaths, RULES,
+  home, skillDirs, agentsDir, hooksDir, teamSkills, skipHooks, agentFile, contextModeOn, registerLead, prepareWorker, ownedFile, LEAD_HOOKS,
+  patchPaths, RULES, sandboxRoots,
 };

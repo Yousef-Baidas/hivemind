@@ -16,20 +16,21 @@
 | thermo-nuclear review | – | – | QA, per milestone |
 | improve-codebase-architecture | – | – | QA, at close |
 
-caveman owns prose, ponytail owns code size, rtk + context-mode own tool output. Chisle covers all three in one ruleset; loaded beside them it restates caveman and ponytail and the two prose styles fight, so it is not part of the stack. Its one uncovered axis, eliding oversized non-Bash tool output, is optional: install it with `CHISLE_DEFAULT_MODE=off` so only the compress hook runs, and never let it elide `Agent` output, which is where verdicts arrive.
+caveman owns prose, ponytail owns code size, rtk + context-mode own tool output. Chisle covers all three in one ruleset; loaded beside them it restates caveman and ponytail and the two prose styles fight, so it is not part of the stack. Its one uncovered axis, eliding oversized non-Bash tool output, is optional: install it with `CHISLE_DEFAULT_MODE=off` so only the compress hook runs, and never let it elide spawn output (`Agent`, `wait_agent`), which is where verdicts arrive.
 
 Never two graph tools on one role. Workers get no repo tour; if one asks for context, fix the ticket. Missing tool → note once in the task list, continue.
 
 ## Context budget (200k lead)
-Lead never reads worker output or diffs; the verifier does. Lead never produces a deliverable either; a fix is a decision dispatched to a worker on the ladder. Lead holds: skill, issue numbers, contracts, task list, one-line verdicts. Never a raw `gh issue view`; always `--json … -q`. `hive-journal.js` meters context from the transcript: at `HIVE_HANDOFF_AT` (default 150000 tokens) it tells the lead to finish the step, log the position, and `/handoff`; at `HIVE_HANDOFF_HARD` (default 180000) the guard refuses new `Agent` spawns until it does. Workers and verifiers are unaffected by a lead restart. Set both lower on a 200k model if compaction still fires first.
+Lead never reads worker output or diffs; the verifier does. Lead never produces a deliverable either; a fix is a decision dispatched to a worker on the ladder. Lead holds: skill, issue numbers, contracts, task list, one-line verdicts. Never a raw `gh issue view`; always `--json … -q`. `hive-journal.js` meters context from the transcript: at `HIVE_HANDOFF_AT` (default 150000 tokens) it tells the lead to finish the step, log the position, and `/handoff`; at `HIVE_HANDOFF_HARD` (default 180000) the guard refuses new spawns until it does. Workers and verifiers are unaffected by a lead restart. Set both lower on a 200k model if compaction still fires first.
 
 ## Worktrees
 ```
 git checkout -b hive/<run> main && git push -u origin hive/<run>
 git worktree add ../<repo>-hive/<id> -b hive/<run>-<id> hive/<run>
-node .claude/hooks/hive-worktree.js ../<repo>-hive/<id> <owned paths…>
+node <hooks>/hive-worktree.js ../<repo>-hive/<id> <owned paths…>
 git rev-parse hive/<run>   # fork point, record in task
 ```
+`<hooks>` is `.claude/hooks`, `.codex/hooks` on Codex. On Codex run each line as its own command, as written: a `cd`, pipe to a filter, or `$(…)` keeps git and `gh` inside the sandbox (`harnesses.md`).
 Worker branches are `hive/<run>-<id>`, never `hive/<run>/<id>`: git cannot hold a ref and a ref-directory of the same name.
 Per worktree: own dev-server port (`.env.local`), own DB/container/SQLite, own install dir. Shared services are why "passes alone, fails together". Binaries outside the worktree (a symlinked `.blend`, an absolute path to a media library or a spreadsheet) are shared too: one writer per such file per wave, or each worktree builds its own copy from the committed scripts. A check that reads the shared original while a worker writes it measures nothing (`domains.md`).
 

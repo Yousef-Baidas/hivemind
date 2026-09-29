@@ -3,7 +3,8 @@
 commit-msg:
   commands:
     conventional:
-      run: node .claude/hooks/commit-msg.js {1}
+      # committed with teams/, so every CLI and every clone has it (.claude/ and .codex/ hooks are machine-local)
+      run: node teams/templates/hooks/commit-msg.js {1}
 
 pre-commit:
   parallel: true

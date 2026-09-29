@@ -1,4 +1,4 @@
-# Link each profile's skills into teams\<profile>\.claude\skills\ (junctions, no admin needed).
+# Link each profile's skills into teams\<profile>\.claude\skills\ and .agents\skills\ (junctions, no admin needed).
 # Run from the repo root. Thin wrapper: the logic lives in link-skills.js next to this file.
 # Windows blocks unsigned scripts by default, so run it as:
 #
