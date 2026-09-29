@@ -111,14 +111,18 @@ function allowedRoots(home, codexHome, projectTop) {
   return roots;
 }
 
-// true if p was removed; false if absent or refused (outside roots, a root dir itself, or in the user's
-// real home while HOME is elsewhere); never throws
+// whether safeRemove refuses p: outside roots, a root dir itself, or in the user's real home while HOME is elsewhere
+function refused(p, roots) {
+  const a = path.resolve(p), r = path.join(realish(path.dirname(a)), path.basename(a)), u = userHome();
+  return (u && inside(r, u) && !inside(realish(HOME), u)) || !roots.some((x) => (samePath(x, r) ? !isDir(x) : inside(r, x)));
+}
+
+// true if p was removed; false if absent or refused; never throws
 function safeRemove(p, roots) {
   try {
     const st = lstat(p);
     if (!st) return false;
-    const r = path.join(realish(path.dirname(path.resolve(p))), path.basename(p)), u = userHome();
-    if ((u && inside(r, u) && !inside(realish(HOME), u)) || !roots.some((x) => (samePath(x, r) ? !isDir(x) : inside(r, x)))) {
+    if (refused(p, roots)) {
       warn(`refused  ${p} (outside what Proteus owns for HOME=${HOME}; left alone)`);
       return false;
     }
@@ -137,6 +141,8 @@ function safeRemove(p, roots) {
 // the git toplevel of the repo being set up, set by withProject; null outside one
 let PROJECT = null;
 const ownedRoots = () => allowedRoots(HOME, CODEX_HOME, PROJECT);
+// link-skills.js's removals, when this process drives them (#13)
+const guardedRemove = (p) => safeRemove(p, ownedRoots());
 function withProject(dir, fn) {
   const was = PROJECT, top = git(["rev-parse", "--show-toplevel"], dir);
   PROJECT = top.ok && top.out ? top.out : null;
@@ -214,7 +220,7 @@ function linkSkills(dir = path.join(CLAUDE, "skills")) {
       if (!safeRemove(link, ownedRoots())) { ok = false; continue; }
       log(`removed  ${link} (old copy, replaced by a link)`);
     } else if (st && !samePath(real(link), target) && !safeRemove(link, ownedRoots())) { ok = false; continue; }
-    linkDir(target, link);
+    linkDir(target, link, guardedRemove);
   }
   if (ok) log(`skills   -> ${path.join(dir, "{proteus,proteus-review}")} linked to ${path.join(real(HERE), "skills")}`);
   return ok;
@@ -424,7 +430,16 @@ function pastShipped(rel, text) {
 
 function registerHooks(root) {
   const script = path.join(HERE, "templates", "hooks", "install-lead-hooks.js");
-  const r = spawnSync(process.execPath, [script], { cwd: root, env: { ...process.env, PROTEUS_HARNESS: HARNESS }, stdio: quiet ? "pipe" : "inherit", encoding: "utf8" });
+  // the adapter's skipped files (Codex's only; Claude's list is empty) an older install copied go here,
+  // through safeRemove; the script then removes none
+  withProject(root, () => {
+    for (const f of codex() ? cx().skipHooks : []) {
+      const p = path.join(cx().hooksDir(root), f), st = lstat(p);
+      if (st && st.isFile() && safeRemove(p, ownedRoots())) log(`removed  ${path.relative(root, p)} (unused by ${HARNESS})`);
+    }
+  });
+  const env = { ...process.env, PROTEUS_HARNESS: HARNESS, PROTEUS_KEEP_SKIPPED: "1" };
+  const r = spawnSync(process.execPath, [script], { cwd: root, env, stdio: quiet ? "pipe" : "inherit", encoding: "utf8" });
   if (r.status === 0) return true;
   warn(`error: ${script} exited ${r.status ?? r.error}; lead hooks may be missing`);
   if (quiet && r.stderr) warn(r.stderr.trim());
@@ -492,7 +507,7 @@ function projectInstall(root, opt) {
   for (const p of dupes) log(`removed  ${path.relative(root, p)} (duplicate of the global install)`);
   for (const p of overrides) log(`local override kept: ${path.relative(root, p).split(path.sep).join("/")} (differs from shipped; delete it to use the shipped one)`);
   copyTeams(root);
-  L.run({ root, install: !!opt.install, confine: !!opt.confine, log });
+  L.run({ root, install: !!opt.install, confine: !!opt.confine, log, remove: guardedRemove });
   // lead autostart + guard: machine-local, never tracked, so worker worktrees do not inherit them
   const ok = registerHooks(root);
   if (codex()) {
@@ -923,7 +938,12 @@ async function doctor(fix) {
   }
   check(() => {
     const dupes = dirs.flatMap((d) => projectDupes(d, false).dupes);
-    return dupes.length ? ["FIX", `duplicate copies: ${dupes.join(", ")}`, `${self} --doctor --fix`] : ["ok", "no duplicate skill or agent copies"];
+    if (!dupes.length) return ["ok", "no duplicate skill or agent copies"];
+    // --fix removes only what safeRemove allows (nothing outside a repo): the rest is a manual step
+    const stuck = withProject(root, () => dupes.filter((p) => refused(p, ownedRoots())));
+    return ["FIX", `duplicate copies: ${dupes.join(", ")}`, stuck.length
+      ? `--fix cannot remove ${stuck.join(", ")}; cd into the repo that holds ${stuck.length === 1 ? "it" : "them"} and re-run, or delete ${stuck.length === 1 ? "it" : "them"} by hand`
+      : `${self} --doctor --fix`];
   }, () => withProject(root, () => dirs.forEach((d) => projectDupes(d, true))));
   if (!cxh) check(() => {
     const kept = dirs.flatMap((d) => projectDupes(d, false).overrides);
@@ -983,12 +1003,12 @@ async function doctor(fix) {
         const teams = path.join(root, "teams");
         const dir = (p) => (cxh ? cx().teamSkills(path.join(teams, p)) : path.join(teams, p, ".claude", "skills"));
         const unlinked = L.profiles(teams).map((p) => [p, L.listFiles(path.join(teams, p)).flatMap(L.readList)
-          .filter(([, name]) => name && !real(path.join(dir(p), name))).length]).filter(([, n]) => n);
+          .filter(([, name]) => L.validName(name) && !real(path.join(dir(p), name))).length]).filter(([, n]) => n);
         const ign = teamsIgnore(teams, false);
         if (ign.length) return ["FIX", `teams/.gitignore lacks ${ign.join(", ")} (skill links would be committed)`, `${self} --project`];
         return unlinked.length ? ["FIX", `team skills not linked (${unlinked.map(([p, n]) => `${p} ${n}`).join(", ")})`, `node "${path.join(SHIPPED_TEAMS, "link-skills.js")}" --install`]
           : ["ok", "team skills linked"];
-      }, () => { teamsIgnore(path.join(root, "teams"), true); L.run({ root, log }); });
+      }, () => { teamsIgnore(path.join(root, "teams"), true); withProject(root, () => L.run({ root, log, remove: guardedRemove })); });
       // CI runs the gate on a clean checkout: the file it names must be tracked (a Codex-only repo
       // has no .claude/hooks/commit-msg.js, and .codex/hooks is machine-local)
       check(() => {
@@ -1028,42 +1048,49 @@ const FLAGS = {
   "--doctor": "doctor", "--fix": "fix", "--auto-update": "autoUpdate", "--no-auto-update": "noAutoUpdate",
   "--tour-done": "tourDone", "--migrate-all": "migrateAll",
 };
-const argv = process.argv.slice(2);
-const opt = {};
 let harnessArg = null;
-for (let i = 0; i < argv.length; i++) {
-  const a = argv[i];
-  if (a === "--harness" || a.startsWith("--harness=")) {
-    harnessArg = a === "--harness" ? argv[++i] : a.slice("--harness=".length);
-    if (!harnessArg) die(`--harness needs a value: ${HARNESSES.join(" or ")}`, 2);
-    continue;
-  }
-  if (a === "--scan" || a.startsWith("--scan=")) {
-    const d = a === "--scan" ? argv[++i] : a.slice("--scan=".length);
-    if (!d) die("--scan needs a directory", 2);
-    SCAN = path.resolve(d);
-    continue;
-  }
-  if (a === "-h" || a === "--help") {
-    const lines = fs.readFileSync(__filename, "utf8").split(/\r?\n/).slice(1);
-    console.log(lines.slice(0, lines.findIndex((l) => !l.startsWith("//"))).map((l) => l.slice(3)).join("\n"));
-    process.exit(0);
-  }
-  if (!FLAGS[a]) die(`unknown flag: ${a} (--help lists them)`, 2);
-  opt[FLAGS[a]] = true;
-}
-HARNESS = String(harnessArg || process.env.PROTEUS_HARNESS || "claude").toLowerCase();
-if (!HARNESSES.includes(HARNESS)) die(`unknown harness: ${HARNESS} (${HARNESSES.join(" or ")})`, 2);
-if ((opt.install || opt.confine) && !opt.project) die("--install/--confine need --project", 2);
-if (opt.confine && codex()) die("--confine hides skills from Claude Code only; Codex reads ~/.agents/skills itself", 2);
-if (opt.fix && !opt.doctor) die("--fix needs --doctor", 2);
-if (opt.doctor && Object.keys(opt).some((k) => k !== "doctor" && k !== "fix")) die("--doctor takes only --fix and --scan", 2);
-if (opt.tourDone && Object.keys(opt).length > 1) die("--tour-done takes no other flag", 2);
-if (opt.autoUpdate && opt.noAutoUpdate) die("--auto-update and --no-auto-update conflict", 2);
 
-(async () => {
-  if (opt.doctor) process.exitCode = (await doctor(opt.fix)) ? 0 : 1;
-  else if (opt.tourDone) tourDone();
-  else if (opt.update) update(argv);
-  else process.exitCode = install(opt) ? 0 : 1;
-})().catch((e) => die(`error: ${e.message}`));
+function main() {
+  const argv = process.argv.slice(2);
+  const opt = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--harness" || a.startsWith("--harness=")) {
+      harnessArg = a === "--harness" ? argv[++i] : a.slice("--harness=".length);
+      if (!harnessArg) die(`--harness needs a value: ${HARNESSES.join(" or ")}`, 2);
+      continue;
+    }
+    if (a === "--scan" || a.startsWith("--scan=")) {
+      const d = a === "--scan" ? argv[++i] : a.slice("--scan=".length);
+      if (!d) die("--scan needs a directory", 2);
+      SCAN = path.resolve(d);
+      continue;
+    }
+    if (a === "-h" || a === "--help") {
+      const lines = fs.readFileSync(__filename, "utf8").split(/\r?\n/).slice(1);
+      console.log(lines.slice(0, lines.findIndex((l) => !l.startsWith("//"))).map((l) => l.slice(3)).join("\n"));
+      process.exit(0);
+    }
+    if (!FLAGS[a]) die(`unknown flag: ${a} (--help lists them)`, 2);
+    opt[FLAGS[a]] = true;
+  }
+  HARNESS = String(harnessArg || process.env.PROTEUS_HARNESS || "claude").toLowerCase();
+  if (!HARNESSES.includes(HARNESS)) die(`unknown harness: ${HARNESS} (${HARNESSES.join(" or ")})`, 2);
+  if ((opt.install || opt.confine) && !opt.project) die("--install/--confine need --project", 2);
+  if (opt.confine && codex()) die("--confine hides skills from Claude Code only; Codex reads ~/.agents/skills itself", 2);
+  if (opt.fix && !opt.doctor) die("--fix needs --doctor", 2);
+  if (opt.doctor && Object.keys(opt).some((k) => k !== "doctor" && k !== "fix")) die("--doctor takes only --fix and --scan", 2);
+  if (opt.tourDone && Object.keys(opt).length > 1) die("--tour-done takes no other flag", 2);
+  if (opt.autoUpdate && opt.noAutoUpdate) die("--auto-update and --no-auto-update conflict", 2);
+
+  (async () => {
+    if (opt.doctor) process.exitCode = (await doctor(opt.fix)) ? 0 : 1;
+    else if (opt.tourDone) tourDone();
+    else if (opt.update) update(argv);
+    else process.exitCode = install(opt) ? 0 : 1;
+  })().catch((e) => die(`error: ${e.message}`));
+}
+
+// required rather than run (tests): the delete guard only, and nothing runs
+module.exports = { allowedRoots, safeRemove };
+if (require.main === module) main();
