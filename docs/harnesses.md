@@ -1,15 +1,15 @@
 # Harness research (2026-09-29)
 
-Where hivemind could run besides Claude Code, and what an adapter per harness would take. Sources: each harness's own docs and source at the versions below; per-feature tables with source links are in `docs/harnesses/{codex,gemini,local,pi}.md`. Anything marked unconfirmed there is unconfirmed here.
+Where Proteus could run besides Claude Code, and what an adapter per harness would take. Sources: each harness's own docs and source at the versions below; per-feature tables with source links are in `docs/harnesses/{codex,gemini,local,pi}.md`. Anything marked unconfirmed there is unconfirmed here.
 
 Versions read: Claude Code 2.1.282 docs, Codex CLI rust-v0.159.0, Gemini CLI v0.61.0 stable (main 0.63.0-nightly), Qwen Code v0.24.7, OpenCode v1.18.33, Goose v1.52.0, Pi v0.87.1 (earendil-works/pi), Crush v0.97.1, Aider v0.86.0, Cursor CLI and Amp docs as of the same date.
 
-## What hivemind needs from a harness
+## What Proteus needs from a harness
 
 | Need | Used for |
 |------|----------|
 | Blocking pre-tool hook with a reason to the model | lead guard (no edits by the lead, the model ladder, merge gates) |
-| Session-start context injection | `hive-state` line, tour offer, update notice |
+| Session-start context injection | `proteus-state` line, tour offer, update notice |
 | Stop / subagent-stop veto | journal, lessons, "report before you stop" |
 | Subagents with a model chosen per spawn | the model ladder |
 | Subagents in their own worktree, in parallel | workers |
@@ -53,14 +53,14 @@ Aider (no hooks, subagents, MCP or AGENTS.md; slow releases), Crush (no real sub
 
 ## Codex adapter (in progress)
 
-`templates/hooks/hive-harness-codex.js`, written from the 0.159 source, covered by fixture tests, and smoke-tested live on codex-cli 0.159.0 (2026-09-29, ChatGPT login, `codex exec` in a throwaway repo). Hooks installed in `<repo>/.codex/hooks` select it by their location.
+`templates/hooks/proteus-harness-codex.js`, written from the 0.159 source, covered by fixture tests, and smoke-tested live on codex-cli 0.159.0 (2026-09-29, ChatGPT login, `codex exec` in a throwaway repo). Hooks installed in `<repo>/.codex/hooks` select it by their location.
 
 - Hooks: `.codex/hooks.json` with absolute paths (hooks get no project-dir variable and run from the turn's cwd through the login shell). Codex runs a new or changed hook only after the human trusts it in `/hooks`, and only in a trusted project. The trust hash covers the hook entry, not the script, so updating a script does not ask again.
 - Edits are `apply_patch` patches that can touch several files; the event carries every path, and one unowned path denies the patch. `apply_patch` run through the shell counts as an edit.
-- Subagents run under the lead's hooks with `agent_id` set, so the lead guard enforces owned paths as it does on Claude Code. Codex makes no worktrees; `hive-worktree.js` already does, and the owned list lives in `.codex/hive-owned`, which the sandbox keeps read-only for the worker.
+- Subagents run under the lead's hooks with `agent_id` set, so the lead guard enforces owned paths as it does on Claude Code. Codex makes no worktrees; `proteus-worktree.js` already does, and the owned list lives in `.codex/proteus-owned`, which the sandbox keeps read-only for the worker.
 - Agents become TOML roles in `$CODEX_HOME/agents` without a `model` key: a role's model overrides the one named on `spawn_agent`, which would defeat the ladder. Roles cannot limit tools, so verifiers are read-only by instruction only.
-- `.codex/rules/hivemind.rules` lets the git writes, `gh`, and the lead's own scripts run outside the sandbox, since workspace-write keeps a worktree's gitdir read-only and turns the network off. `reset`, `clean` and other rewrites still ask.
-- No default ladder: a Codex lead runs single-model (every spawn on the lead's model) until `models.ladder` in `hivemind.json` or a `models:` line names the rungs.
+- `.codex/rules/proteus.rules` lets the git writes, `gh`, and the lead's own scripts run outside the sandbox, since workspace-write keeps a worktree's gitdir read-only and turns the network off. `reset`, `clean` and other rewrites still ask.
+- No default ladder: a Codex lead runs single-model (every spawn on the lead's model) until `models.ladder` in `proteus.json` or a `models:` line names the rungs.
 - Not enforceable on Codex: background shell calls (the hook sees no yield time), the failed-tool and teammate-idle hooks, the status line.
 - Verified live: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop and SubagentStop fire under `codex exec`, and the tool hooks fire inside a subagent with its own `agent_id` and model (lead `gpt-6-astra`, subagent `gpt-6-luna` from `spawn_agent`'s `model`). The guard denied the lead's `apply_patch` and a spawn off the ladder, the autostart context reached the model, the TOML roles loaded as spawnable agent types, and the transcript readers read a real rollout. `git commit` in workspace-write succeeded with the rules file and did not without it.
 - Found live: multi-agent v2 names its tools with a namespace prefix and no separator (`collaborationspawn_agent`, `collaborationwait_agent`), serialises no `Agent` alias for them, and sends the spawn `message` encrypted. The adapter treats any name ending in `spawn_agent` as a spawn and the guard's matcher is a regex for the same; only the `model` argument is read. `view_image` takes `path`; patches name absolute paths.
@@ -79,7 +79,7 @@ The only benchmarks found are from late 2025. Qwen3-32B scores 40% on the Aider 
 
 ## Recommended shape
 
-1. **Split core from adapter.** Done for the hooks (2026-09-29): `templates/hooks/hive-harness.js` documents the hive event and the adapter contract, `hive-harness-claude.js` is the reference adapter, `hive-lib.js` holds only what every CLI shares, and all 232 existing tests pass unchanged. Still Claude-specific: `install.js`, `worktree-settings.local.json`, the agent files, and the skill prose that names `Agent`, `Edit` and `Bash`; these move per adapter. The core is everything already portable: the skill prose and references, GitHub tracker state, CI and lefthook gates, `teams/`, AGENTS.md, and the model ladder (already configurable through `models.ladder`). Hook scripts take a normalised event (`{event, session, cwd, model, transcript, tool, input}`) and return a normalised verdict (`allow`, `deny + reason`, `context`, `continue + reason`). Each adapter maps the harness's hook JSON to that and back, installs agent files in the harness's format, and names its spawn call.
+1. **Split core from adapter.** Done for the hooks (2026-09-29): `templates/hooks/proteus-harness.js` documents the Proteus event and the adapter contract, `proteus-harness-claude.js` is the reference adapter, `proteus-lib.js` holds only what every CLI shares, and all 232 existing tests pass unchanged. Still Claude-specific: `install.js`, `worktree-settings.local.json`, the agent files, and the skill prose that names `Agent`, `Edit` and `Bash`; these move per adapter. The core is everything already portable: the skill prose and references, GitHub tracker state, CI and lefthook gates, `teams/`, AGENTS.md, and the model ladder (already configurable through `models.ladder`). Hook scripts take a normalised event (`{event, session, cwd, model, transcript, tool, input}`) and return a normalised verdict (`allow`, `deny + reason`, `context`, `continue + reason`). Each adapter maps the harness's hook JSON to that and back, installs agent files in the harness's format, and names its spawn call.
 2. **Two spawn modes.** In-harness subagents where the harness allows a model per spawn and parallel runs (Claude Code, Codex, probably Qwen). Otherwise one headless process per worker in its own worktree (`codex exec --cd`, `opencode run --dir --model`, `gemini -p`), with the model on the command line. No per-spawn model at all means single-model mode: the ladder collapses to the lead's model.
 3. **Graceful gaps.** No question tool: plain numbered questions. No scriptable status line: the inbox line goes into session-start context instead. No stop veto: the journal writes on the last tool call instead.
 4. **Order.** Core split with Claude Code as the reference adapter and the current tests passing unchanged; then Codex (best hook parity, per-spawn model); then Qwen Code (close to free once Codex exists); then Pi or OpenCode for local models (both need a JS/TS bridge and process-per-worker; Pi has the better hooks and UI, OpenCode the native subagents and a stable MCP); Gemini CLI only on demand.

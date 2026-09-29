@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Install, update or check the hivemind skill for Claude Code (Linux / macOS / Git Bash).
+# Install, update or check the Proteus skill for Claude Code (Linux / macOS / Git Bash).
 # All logic lives in install.js; this only finds node. Flags pass through unchanged.
 #
 #   ./install.sh                     link the skills into ~/.claude/skills (every repo), copy agents
 #   ./install.sh --project           also set up the current repo: teams/ with linked skills and
-#                                    the lead's autostart + guard hooks (HIVEMIND=0 claude skips them)
+#                                    the lead's autostart + guard hooks (PROTEUS=0 claude skips them)
 #   ./install.sh --project --install --confine   fetch missing skills, hide them from the lead
 #   ./install.sh --update            git pull this checkout, reinstall, refresh the current repo
 #   ./install.sh --auto-update       let sessions pull this checkout (--no-auto-update: stop)

@@ -1,4 +1,4 @@
-# .github/workflows/hive-gates.yml — written by the hivemind scaffold ticket.
+# .github/workflows/hive-gates.yml — written by the Proteus scaffold ticket.
 # Every PR into hive/* runs the same gates the worker ran. Branch protection on
 # hive/<run> requires this job green plus one approving review (the verifier).
 name: hive-gates

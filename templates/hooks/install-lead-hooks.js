@@ -2,15 +2,15 @@
 // Run from a repo root by the installer: node <checkout>/templates/hooks/install-lead-hooks.js
 // Copies every file beside it (except itself and the adapter's skipHooks, which it removes if an
 // older install left them) into the harness's hooks dir (.claude/hooks/), so the lead can run
-// hive-worktree.js and hive-status.js from there, and registers the lead's hooks
+// proteus-worktree.js and proteus-status.js from there, and registers the lead's hooks
 // (Claude Code: .claude/settings.local.json, machine-local and untracked, so worktrees never inherit it).
 // Idempotent: an entry whose command already names the script is left alone, other hooks are
-// never touched, an old narrower hive-lead-guard matcher is widened. Invalid JSON → exit 1.
+// never touched, an old narrower proteus-lead-guard matcher is widened. Invalid JSON → exit 1.
 "use strict";
 const fs = require("fs");
 const path = require("path");
-const lib = require(path.join(__dirname, "hive-lib.js"));
-const ad = require(path.join(__dirname, "hive-harness.js"));
+const lib = require(path.join(__dirname, "proteus-lib.js"));
+const ad = require(path.join(__dirname, "proteus-harness.js"));
 
 const hooksDir = ad.hooksDir(".");
 const self = path.basename(__filename);

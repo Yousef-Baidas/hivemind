@@ -1,5 +1,5 @@
-# shipped default; hive-scout replaces this list for your stack. <owner/repo> <skill-name> per line.
+# shipped default; proteus-scout replaces this list for your stack. <owner/repo> <skill-name> per line.
 # Claude Code's built-in /security-review is always available; these add stack-specific checks.
-# hive-scout rewrites this file for your stack during bootstrap; human approves the list.
+# proteus-scout rewrites this file for your stack during bootstrap; human approves the list.
 github/awesome-copilot sql-code-review
 better-auth/skills two-factor-authentication-best-practices

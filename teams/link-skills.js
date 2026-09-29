@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Link each profile's skills into teams/<profile>/.claude/skills/ (Claude Code) and
-// teams/<profile>/.agents/skills/ (Codex), so one repo serves both CLIs. Run from the repo root. Copied here by hivemind's install.js --project
-// (link-skills.sh and link-skills.ps1 are thin wrappers); hive-scout re-runs it after
+// teams/<profile>/.agents/skills/ (Codex), so one repo serves both CLIs. Run from the repo root. Copied here by Proteus's install.js --project
+// (link-skills.sh and link-skills.ps1 are thin wrappers); proteus-scout re-runs it after
 // rewriting a skills.txt.
 //
 //   node teams/link-skills.js              link what is already on this machine
@@ -11,7 +11,7 @@
 //   node teams/link-skills.js --relock     accept current hashes into teams/skills-lock.json
 //
 // skills.txt line format:  <owner/repo> <skill-name>
-// required.txt (same format) holds the pipeline's mandatory skills; hive-scout never
+// required.txt (same format) holds the pipeline's mandatory skills; proteus-scout never
 // rewrites it and it does not count against the eight-per-profile cap.
 // teams/skills-lock.json pins each linked skill's content hash (sha256 over its files);
 // a differing hash on this machine prints "drift: <skill>" and keeps the committed hash.
@@ -26,8 +26,8 @@ const { spawnSync } = require("child_process");
 
 const WIN = process.platform === "win32";
 const HOME = os.homedir();
-// hivemind's own global links; never confined
-const OURS = new Set(["hivemind", "hivemind-review"]);
+// Proteus's own global links; never confined
+const OURS = new Set(["proteus", "proteus-review"]);
 // Claude Code loads a team's .claude/skills once a worker reads a file in the team folder. Codex
 // loads .agents/skills only between the repo root and the session cwd, and a spawned subagent
 // keeps the lead's cwd, so a Codex worker opens <team>/.agents/skills/<name>/SKILL.md itself.

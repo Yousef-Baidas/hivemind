@@ -16,7 +16,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 }
 $js = Join-Path $PSScriptRoot "link-skills.js"
 if (-not (Test-Path -LiteralPath $js)) {
-    Write-Host "$js missing; re-run hivemind's install.ps1 -Project"
+    Write-Host "$js missing; re-run Proteus's install.ps1 -Project"
     exit 1
 }
 $flags = @()

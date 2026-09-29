@@ -1,32 +1,38 @@
 #!/usr/bin/env node
-// Install, update or check the hivemind skill for Claude Code or Codex, on any OS (Node 22.5+, which context-mode needs).
+// Install, update or check the Proteus skill for Claude Code or Codex, on any OS (Node 22.5+, which context-mode needs).
 // install.sh and install.ps1 are thin wrappers around this file.
 //
-//   node install.js                   link skills/{hivemind,hivemind-review} into ~/.claude/skills
+//   node install.js                   link skills/{proteus,proteus-review} into ~/.claude/skills
 //                                     (every repo; `git pull` here updates them), copy agents/*.md
-//                                     to ~/.claude/agents, record this checkout in ~/.claude/hivemind.json,
+//                                     to ~/.claude/agents, record this checkout in ~/.claude/proteus.json,
 //                                     install the required context-mode plugin through the claude CLI
 //   node install.js --project         also set up the current repo: teams/<profile>/ with skills
 //                                     linked per skills.txt, the lead's hooks in
-//                                     .claude/settings.local.json (HIVEMIND=0 claude skips them);
+//                                     .claude/settings.local.json (PROTEUS=0 claude skips them);
 //                                     removes project copies of the skill and unmodified agents
 //   node install.js --project --install   also `npx skills add` any skill not on this machine
 //   node install.js --project --confine   also remove the global ~/.claude/skills/<name> link
 //                                         for every linked skill, so the lead never sees it
 //   node install.js --update          git pull --ff-only this checkout, reinstall, and refresh the
-//                                     current repo too if it is a hivemind project
+//                                     current repo too if it is a Proteus project
 //   node install.js --auto-update     let the SessionStart hook pull this checkout (off by default);
 //   node install.js --no-auto-update  both run the global install and persist the choice
 //   node install.js --doctor [--fix]  check the setup; --fix applies the safe local fixes
 //   node install.js --tour-done       record the tour as taken (the lead runs it when the tour ends
 //                                     or is skipped); the session start stops offering it until
 //                                     a new feature lands
-//   --harness codex                   any of the above for OpenAI Codex CLI instead (or HIVE_HARNESS=codex;
+//   --harness codex                   any of the above for OpenAI Codex CLI instead (or PROTEUS_HARNESS=codex;
 //                                     default claude): skills linked into ~/.agents/skills, agents as
 //                                     TOML in $CODEX_HOME/agents, the lead's hooks in .codex/hooks.json
-//                                     and .codex/rules/hivemind.rules, ../<repo>-hive writable in
+//                                     and .codex/rules/proteus.rules, ../<repo>-hive writable in
 //                                     .codex/config.toml; --update reinstalls every
-//                                     harness recorded in ~/.claude/hivemind.json
+//                                     harness recorded in ~/.claude/proteus.json
+//   --scan <dir>                      where to look for repos still on hivemind (default ~/Projects)
+//   --migrate-all                     also move every repo found there from hivemind to Proteus
+//
+// Proteus was called hivemind. Any install takes over from it: the old skill links, generated
+// agents and hivemind.json go (edited agents stay and are named), --project removes the
+// repo's hive-*.js hooks and their registrations before installing its own.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -39,29 +45,37 @@ const { WIN, lstat, real, isDir, isFile, samePath, removeLink, linkDir } = L;
 const HERE = __dirname;
 const HOME = os.homedir();
 const CLAUDE = path.join(HOME, ".claude");
-const SKILLS = ["hivemind", "hivemind-review"];
+const SKILLS = ["proteus", "proteus-review"];
 const LINK_SCRIPTS = ["link-skills.js", "link-skills.sh", "link-skills.ps1"];
-const EXCLUDE = [".claude/settings.local.json", ".claude/hooks/hive-*.js", ".claude/hooks/worktree-settings.local.json", ".claude/hive-owned"];
+const EXCLUDE = [".claude/settings.local.json", ".claude/hooks/proteus-*.js", ".claude/hooks/worktree-settings.local.json", ".claude/proteus-owned"];
 const TEAMS_ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS";
 const CTX_PLUGIN = "context-mode@context-mode";
 const CTX_MARKET = "mksglu/context-mode";
 const NODE_MIN = "22.5.0";
 const HARNESSES = ["claude", "codex"];
 const AGENTS_SKILLS = path.join(HOME, ".agents", "skills"); // Codex reads skills here and in <repo>/.agents/skills
-const CODEX_EXCLUDE = [".codex/hooks.json", ".codex/hooks/hive-*.js", ".codex/rules/hivemind.rules", ".codex/hive-owned"];
+const CODEX_EXCLUDE = [".codex/hooks.json", ".codex/hooks/proteus-*.js", ".codex/rules/proteus.rules", ".codex/proteus-owned"];
 // the commit-msg gate runs from here on every CLI: committed with teams/, refreshed by --project
 const COMMIT_MSG = "teams/templates/hooks/commit-msg.js";
 const CODEX_CTX = "codex mcp add context-mode --env CONTEXT_MODE_PLATFORM=codex -- npx -y context-mode";
-const GENERATED = "# generated by hivemind";
+const GENERATED = "# generated by proteus";
+// hivemind, the old name: what its installs left behind (see "takeover" below)
+const OLD_SKILLS = ["hivemind", "hivemind-review"];
+const OLD_CONFIG = path.join(CLAUDE, "hivemind.json");
+const OLD_GENERATED = "# generated by hivemind";
+const OLD_HOOK = /^hive-[\w-]+\.js$/;
+const OLD_EXCLUDE = [".claude/hooks/hive-*.js", ".claude/hive-owned", ".codex/hooks/hive-*.js", ".codex/rules/hivemind.rules", ".codex/hive-owned",
+  "/.claude/hive-owned", "/.claude/hooks/hive-*.js", "/.codex/hive-owned", "/.codex/hooks/hive-*.js", "# hivemind: machine-local worker files"];
+const CODEX_HOME = process.env.CODEX_HOME || path.join(HOME, ".codex");
 // sha256 (LF line endings) of templates/hooks/settings.local.json as shipped before its rename
 const OLD_WORKER_SETTINGS = "365bfd02b83f795a76f0656aeb238f7295c0194dad2babce80ef37bba5692542";
 
 let quiet = false;
-let HARNESS = "claude"; // --harness, else HIVE_HARNESS; set in main
+let HARNESS = "claude"; // --harness, else PROTEUS_HARNESS; set in main
 const codex = () => HARNESS === "codex";
 // the Codex adapter reads CODEX_HOME when loaded: only on the codex path
 let cxAd = null;
-const cx = () => cxAd || (cxAd = require(path.join(HERE, "templates", "hooks", "hive-harness-codex.js")));
+const cx = () => cxAd || (cxAd = require(path.join(HERE, "templates", "hooks", "proteus-harness-codex.js")));
 const log = (s = "") => { if (!quiet) console.log(s); };
 const warn = (s) => console.error(s);
 const die = (s, code = 1) => { warn(s); process.exit(code); };
@@ -117,7 +131,7 @@ function copyTree(src, dest) {
 }
 
 const shippedAgents = () => fs.readdirSync(path.join(HERE, "agents")).filter((f) => f.endsWith(".md")).sort();
-const isHiveProject = (dir, h = "claude") => isDir(path.join(dir, "teams")) && isFile(path.join(dir, `.${h}`, "hooks", "hive-autostart.js"));
+const isProteusProject = (dir, h = "claude") => isDir(path.join(dir, "teams")) && isFile(path.join(dir, `.${h}`, "hooks", "proteus-autostart.js"));
 
 function envCommand() {
   if (WIN) return `[Environment]::SetEnvironmentVariable("${TEAMS_ENV}", "1", "User")`;
@@ -151,7 +165,7 @@ function linkSkills(dir = path.join(CLAUDE, "skills")) {
     }
     linkDir(target, link);
   }
-  if (ok) log(`skills   -> ${path.join(dir, "{hivemind,hivemind-review}")} linked to ${path.join(real(HERE), "skills")}`);
+  if (ok) log(`skills   -> ${path.join(dir, "{proteus,proteus-review}")} linked to ${path.join(real(HERE), "skills")}`);
   return ok;
 }
 
@@ -177,8 +191,8 @@ function setAttribution() {
   return true;
 }
 
-// ~/.claude/hivemind.json: { home, autoUpdate, ...keys the hooks own }
-const CONFIG = path.join(CLAUDE, "hivemind.json");
+// ~/.claude/proteus.json: { home, autoUpdate, ...keys the hooks own }
+const CONFIG = path.join(CLAUDE, "proteus.json");
 function readConfig() {
   const c = readJson(CONFIG);
   if (!c) warn(`warning: ${CONFIG} was not valid JSON; rewritten`);
@@ -227,7 +241,7 @@ function copyCodexAgents() {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(p, a.text);
   }
-  for (const p of kept) log(`local override kept: ${p} (not generated by hivemind; delete it to use the shipped one)`);
+  for (const p of kept) log(`local override kept: ${p} (not generated by proteus; delete it to use the shipped one)`);
   log(`agents   -> ${dir} (${codexAgents().length} shipped as TOML, others untouched)`);
 }
 
@@ -255,7 +269,7 @@ function codexTrusted(root) {
 function codexSteps(root, project) {
   const steps = [];
   if (project && !codexTrusted(root)) steps.push("open codex in this repo and trust it: project .codex/ config and hooks load only in a trusted project");
-  if (project) steps.push("approve the hivemind hooks in /hooks (Codex asks again only when a hook entry changes)");
+  if (project) steps.push("approve the Proteus hooks in /hooks (Codex asks again only when a hook entry changes)");
   if (!cx().contextModeOn()) steps.push(`add the required context-mode MCP server: ${CODEX_CTX}`);
   if (!steps.length) return;
   log("");
@@ -318,7 +332,7 @@ function projectDupes(dir, act) {
     const p = path.join(dir, ".claude", "agents", f);
     const t = readText(p);
     if (t === null) continue;
-    if (norm(t) === norm(fs.readFileSync(path.join(HERE, "agents", f), "utf8")) || pastAgent(f, t)) {
+    if (norm(t) === norm(fs.readFileSync(path.join(HERE, "agents", f), "utf8")) || pastShipped(`agents/${f}`, t)) {
       dupes.push(p);
       if (act) { if (lstat(p).isSymbolicLink()) removeLink(p); else fs.unlinkSync(p); }
     } else overrides.push(p);
@@ -326,32 +340,49 @@ function projectDupes(dir, act) {
   return { dupes, overrides };
 }
 
-// an agent file identical to a version this checkout once shipped is an old installer's copy,
-// not an edit; needs the checkout's git history, so a non-git copy of hivemind never matches
-const pastHashes = {};
-function pastAgent(f, text) {
-  const hash = (s) => crypto.createHash("sha256").update(norm(s).trimEnd()).digest("hex");
-  if (!pastHashes[f]) {
-    pastHashes[f] = new Set();
-    const commits = git(["log", "--format=%H", "--", `agents/${f}`], HERE);
-    for (const c of commits.ok ? commits.out.split("\n").filter(Boolean) : []) {
-      const r = spawnSync("git", ["show", `${c}:agents/${f}`], { cwd: HERE, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-      if (r.status === 0) pastHashes[f].add(hash(r.stdout));
+// A file identical to a version this checkout once shipped (rel: its path here, e.g.
+// agents/hive-guide.md) is an old installer's copy, not an edit; with no text, whether rel ever
+// shipped. Needs the checkout's git history, so a non-git copy of Proteus never matches.
+let pastHashes = null;
+const hashText = (s) => crypto.createHash("sha256").update(norm(s).trimEnd()).digest("hex");
+function pastShipped(rel, text) {
+  if (!pastHashes) {
+    pastHashes = new Map();
+    const r = git(["log", "--format=%H", "--name-only", "--no-renames", "--", "agents", "templates/hooks"], HERE);
+    const want = [];
+    let c = null;
+    for (const l of r.ok ? r.out.split("\n") : []) {
+      if (/^[0-9a-f]{40}$/.test(l)) c = l;
+      else if (l && c) want.push(`${c}:${l}`);
+    }
+    // one git process for every blob: "<sha> blob <size>\n<bytes>\n", or "<name> missing\n"
+    const out = want.length ? spawnSync("git", ["cat-file", "--batch"], { cwd: HERE, input: want.join("\n") + "\n", maxBuffer: 1 << 30 }).stdout : null;
+    let at = 0;
+    for (const w of out ? want : []) {
+      const nl = out.indexOf(10, at);
+      const head = out.toString("utf8", at, nl).split(" ");
+      at = nl + 1;
+      if (head[1] !== "blob") continue;
+      const size = Number(head[2]), f = w.slice(41);
+      if (!pastHashes.has(f)) pastHashes.set(f, new Set());
+      pastHashes.get(f).add(hashText(out.toString("utf8", at, at + size)));
+      at += size + 1;
     }
   }
-  return pastHashes[f].has(hash(text));
+  const h = pastHashes.get(rel);
+  return text === undefined ? !!h : !!h && h.has(hashText(text));
 }
 
 function registerHooks(root) {
   const script = path.join(HERE, "templates", "hooks", "install-lead-hooks.js");
-  const r = spawnSync(process.execPath, [script], { cwd: root, env: { ...process.env, HIVE_HARNESS: HARNESS }, stdio: quiet ? "pipe" : "inherit", encoding: "utf8" });
+  const r = spawnSync(process.execPath, [script], { cwd: root, env: { ...process.env, PROTEUS_HARNESS: HARNESS }, stdio: quiet ? "pipe" : "inherit", encoding: "utf8" });
   if (r.status === 0) return true;
   warn(`error: ${script} exited ${r.status ?? r.error}; lead hooks may be missing`);
   if (quiet && r.stderr) warn(r.stderr.trim());
   return false;
 }
 
-function excludeLocal(root, list = EXCLUDE, what = "settings.local.json, hive hooks, hive-owned") {
+function excludeLocal(root, list = EXCLUDE, what = "settings.local.json, Proteus hooks, proteus-owned") {
   const r = git(["rev-parse", "--git-common-dir"], root);
   if (!r.ok) { log("exclude  -> skipped (not a git repo)"); return; }
   const file = path.join(path.resolve(root, r.out), "info", "exclude");
@@ -416,7 +447,7 @@ function projectInstall(root, opt) {
   if (codex()) {
     const w = sandboxRoots(root);
     // a config.toml the repo already had may be tracked or the user's: never exclude it
-    excludeLocal(root, w.created ? [...CODEX_EXCLUDE, ".codex/config.toml"] : CODEX_EXCLUDE, `hooks.json, hive hooks, rules, hive-owned${w.created ? ", config.toml" : ""}`);
+    excludeLocal(root, w.created ? [...CODEX_EXCLUDE, ".codex/config.toml"] : CODEX_EXCLUDE, `hooks.json, Proteus hooks, rules, proteus-owned${w.created ? ", config.toml" : ""}`);
     return ok && !w.error;
   }
   excludeLocal(root);
@@ -431,32 +462,239 @@ function sandboxRoots(root) {
   return w;
 }
 
+// takeover: Proteus was called hivemind. An install removes only what hivemind's installs
+// created; anything edited or of unclear origin stays and is named.
+
+// shared helpers read HARNESS: run fn as if --harness h was given
+function withHarness(h, fn) {
+  const was = HARNESS;
+  HARNESS = h;
+  try { return fn(); } finally { HARNESS = was; }
+}
+const rmPath = (p) => { const st = lstat(p); if (!st) return; if (st.isSymbolicLink()) removeLink(p); else fs.rmSync(p, { recursive: true, force: true }); };
+// a skill dir that is a link, or a copy an old installer made, never a real dir of the user's
+const oldSkillCopy = (p, name) => { const st = lstat(p); return !!st && (st.isSymbolicLink() || (st.isDirectory() && frontmatterName(p) === name && !inside(HERE, p))); };
+const listDir = (d, re) => (isDir(d) ? fs.readdirSync(d).filter((f) => re.test(f)).sort() : []);
+const oldHarnesses = (c) => (!c ? [] : Array.isArray(c.harnesses) ? c.harnesses.filter((h) => HARNESSES.includes(h)) : c.home ? ["claude"] : []);
+
+// hivemind.json becomes proteus.json, a key in both keeping its proteus value; returns the old config
+function migrateConfig() {
+  if (!lstat(OLD_CONFIG)) return null;
+  const old = readJson(OLD_CONFIG), cur = readJson(CONFIG);
+  if (!old || !cur) { warn(`warning: ${old ? CONFIG : OLD_CONFIG} is not valid JSON; ${OLD_CONFIG} left in place, merge it into ${CONFIG} by hand`); return null; }
+  writeJson(CONFIG, { ...old, ...cur });
+  fs.unlinkSync(OLD_CONFIG);
+  log(`config   -> ${OLD_CONFIG} merged into ${CONFIG} and removed`);
+  if (typeof old.home === "string" && !samePath(real(old.home) || old.home, real(HERE))) log(`note     : ${old.home} (the hivemind checkout) is no longer used; delete it when you like`);
+  return old;
+}
+
+// hivemind's global pieces for both CLIs: skill links or copies, generated agents.
+// Returns { found, kept, harnesses }; act removes found.
+function oldGlobal(act) {
+  const found = [], kept = [], harnesses = new Set();
+  const drop = (p, h) => { found.push(p); harnesses.add(h); if (act) rmPath(p); };
+  for (const [h, dir] of [["claude", path.join(CLAUDE, "skills")], ["codex", AGENTS_SKILLS]]) {
+    for (const s of OLD_SKILLS) {
+      const p = path.join(dir, s);
+      if (oldSkillCopy(p, s)) drop(p, h);
+      else if (lstat(p)) kept.push(`${p} (not a link or a copy of hivemind's skill)`);
+    }
+  }
+  // an agent name hivemind never shipped is the user's own: not ours to mention
+  const md = path.join(CLAUDE, "agents");
+  for (const f of listDir(md, /^hive-[\w-]+\.md$/)) {
+    const p = path.join(md, f), t = readText(p);
+    if (!pastShipped(`agents/${f}`)) continue;
+    if (t !== null && pastShipped(`agents/${f}`, t)) drop(p, "claude");
+    else kept.push(`${p} (edited; Proteus spawns proteus-${f.slice(5)})`);
+  }
+  const toml = path.join(CODEX_HOME, "agents");
+  for (const f of listDir(toml, /^hive-[\w-]+\.toml$/)) {
+    const p = path.join(toml, f), t = readText(p);
+    if (t !== null && norm(t).startsWith(OLD_GENERATED)) drop(p, "codex");
+    else if (pastShipped(`agents/${f.replace(/\.toml$/, ".md")}`)) kept.push(`${p} (not generated by hivemind; Proteus spawns proteus-${f.slice(5)})`);
+  }
+  return { found, kept, harnesses };
+}
+
+// hivemind's global pieces out, Proteus in for every CLI hivemind was set up for (and those in also)
+function takeoverGlobal(config, also = []) {
+  const old = migrateConfig();
+  const g = oldGlobal(true);
+  for (const p of g.found) log(`removed  ${p} (hivemind's; Proteus replaces it)`);
+  for (const p of g.kept) log(`kept     ${p}`);
+  let ok = true;
+  for (const h of new Set([HARNESS, ...also, ...g.harnesses, ...oldHarnesses(old)])) {
+    if (h !== HARNESS) log(`takeover -> Proteus for ${h} too (hivemind was set up for it)`);
+    ok = withHarness(h, () => (codex() ? codexGlobalInstall(config) : globalInstall(config))) && ok;
+  }
+  return { ok, old };
+}
+
+// hivemind's pieces in a repo: its hooks and their registrations, the Codex rules file, copies
+// of its skill and agents, its hooks under teams/templates, its .git/info/exclude lines.
+// Returns { found, kept, harnesses }; act removes found (paths relative to root).
+const OLD_CMD = /\.(claude|codex)[\\/]hooks[\\/]hive-[\w-]+\.js/;
+const renameExclude = (l) => l.replace("hivemind", "proteus").replace(/hive-(?=\*|owned)/, "proteus-");
+function migrateProject(root, act) {
+  const found = [], kept = [], harnesses = new Set();
+  const rel = (p) => path.relative(root, p).split(path.sep).join("/");
+  const drop = (p, h) => { found.push(rel(p)); if (h) harnesses.add(h); if (act) rmPath(p); };
+  const tracked = new Set(git(["ls-files", "--", ".claude/hooks", ".codex/hooks"], root).out.split("\n").filter(Boolean));
+  for (const h of HARNESSES) {
+    const dir = path.join(root, `.${h}`, "hooks");
+    for (const f of listDir(dir, OLD_HOOK)) {
+      if (tracked.has(`.${h}/hooks/${f}`)) kept.push(`.${h}/hooks/${f} (tracked by git; delete it in a commit)`);
+      else drop(path.join(dir, f), h);
+    }
+  }
+  for (const [h, file] of [["claude", path.join(root, ".claude", "settings.local.json")], ["codex", path.join(root, ".codex", "hooks.json")]]) {
+    const text = readText(file);
+    if (text === null || !(OLD_CMD.test(text) || /hive-statusline\.js/.test(text))) continue;
+    const s = readJson(file);
+    if (!s) { kept.push(`${rel(file)} (not valid JSON; remove its hive-*.js hooks by hand)`); continue; }
+    let n = 0;
+    const hooks = s.hooks && typeof s.hooks === "object" ? s.hooks : {};
+    for (const ev of Object.keys(hooks)) {
+      if (!Array.isArray(hooks[ev])) continue;
+      const before = n;
+      // an entry left with no hooks goes too, then an event left with no entries
+      hooks[ev] = hooks[ev].filter((e) => {
+        if (!e || !Array.isArray(e.hooks)) return true;
+        const keep = e.hooks.filter((x) => !(x && OLD_CMD.test(String(x.command))));
+        n += e.hooks.length - keep.length;
+        const emptied = keep.length < e.hooks.length && !keep.length;
+        e.hooks = keep;
+        return !emptied;
+      });
+      if (n > before && !hooks[ev].length) delete hooks[ev];
+    }
+    // registerLead sets a statusLine only where none is: hivemind's must go first
+    if (s.statusLine && /hive-statusline\.js/.test(String(s.statusLine.command))) { delete s.statusLine; n++; }
+    if (!n) continue;
+    found.push(`${rel(file)}: ${n} hivemind entr${n === 1 ? "y" : "ies"}`);
+    harnesses.add(h);
+    if (act) writeJson(file, s);
+  }
+  const rules = path.join(root, ".codex", "rules", "hivemind.rules");
+  if (isFile(rules)) drop(rules, "codex");
+  for (const [d, h] of [[path.join(root, ".claude", "skills"), "claude"], [path.join(root, ".agents", "skills"), "codex"]]) {
+    for (const s of OLD_SKILLS) if (oldSkillCopy(path.join(d, s), s)) drop(path.join(d, s), h);
+  }
+  const md = path.join(root, ".claude", "agents");
+  for (const f of listDir(md, /^hive-[\w-]+\.md$/)) {
+    if (!pastShipped(`agents/${f}`)) continue;
+    const t = readText(path.join(md, f));
+    if (t !== null && pastShipped(`agents/${f}`, t)) drop(path.join(md, f), "claude");
+    else kept.push(`${rel(path.join(md, f))} (edited; Proteus spawns proteus-${f.slice(5)})`);
+  }
+  // the committed copies the gates run from: an unedited one goes (a commit then records it)
+  const tpl = path.join(root, "teams", "templates", "hooks");
+  for (const f of listDir(tpl, OLD_HOOK)) {
+    const t = readText(path.join(tpl, f));
+    if (t !== null && pastShipped(`templates/hooks/${f}`, t)) drop(path.join(tpl, f));
+    else kept.push(`${rel(path.join(tpl, f))} (edited, or not hivemind's)`);
+  }
+  // .git/info/exclude is shared by every worktree: while linked ones still run hivemind's hooks,
+  // its lines stay beside the renamed ones; a later --doctor --fix drops them
+  const x = git(["rev-parse", "--git-common-dir"], root);
+  const file = x.ok && path.join(path.resolve(root, x.out), "info", "exclude");
+  const text = file && readText(file);
+  if (text) {
+    const lines = text.split(/\r?\n/);
+    const linked = git(["worktree", "list", "--porcelain"], root).out.split("\n").filter((l) => l.startsWith("worktree ")).length > 1;
+    const todo = lines.filter((l) => OLD_EXCLUDE.includes(l) && (!linked || !lines.includes(renameExclude(l))));
+    if (todo.length) {
+      found.push(`${rel(file)}: ${todo.length} hivemind line${todo.length === 1 ? "" : "s"} ${linked ? "renamed, old ones kept for linked worktrees" : "renamed"}`);
+      if (act) {
+        const next = [];
+        for (const l of lines) {
+          if (!OLD_EXCLUDE.includes(l)) { next.push(l); continue; }
+          if (linked) next.push(l);
+          if (!lines.includes(renameExclude(l)) && !next.includes(renameExclude(l))) next.push(renameExclude(l));
+        }
+        fs.writeFileSync(file, next.join(/\r\n/.test(text) ? "\r\n" : "\n"));
+      }
+    }
+  }
+  return { found, kept, harnesses };
+}
+
+// a repo from hivemind to Proteus: its old pieces out, then the project install for each CLI
+// in base or set up by hivemind there
+function migrateRepo(root, opt = {}, base = []) {
+  const m = migrateProject(root, true);
+  for (const p of m.found) log(`removed  ${p} (hivemind's)`);
+  for (const p of m.kept) log(`kept     ${p}`);
+  let ok = true;
+  for (const h of new Set([...base, ...m.harnesses])) ok = withHarness(h, () => projectInstall(root, { ...opt, confine: opt.confine && h === "claude" })) && ok;
+  return ok;
+}
+
+// repos under SCAN (3 levels down) whose lead hooks are still hivemind's
+let SCAN = path.join(HOME, "Projects");
+function scanOld(dir = SCAN) {
+  const out = [];
+  const walk = (d, depth) => {
+    if (HARNESSES.some((h) => isFile(path.join(d, `.${h}`, "hooks", "hive-autostart.js")))) out.push(d);
+    if (depth >= 3) return;
+    let ents = [];
+    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) if (e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules") walk(path.join(d, e.name), depth + 1);
+  };
+  walk(dir, 0);
+  return out.filter((d) => !samePath(real(d), real(HERE)) && !samePath(real(d), real(HOME)));
+}
+const scanFlag = () => (samePath(SCAN, path.join(HOME, "Projects")) ? "" : ` --scan "${SCAN}"`);
+
+// other repos still on hivemind: listed with the command that moves each, or with all moved
+function oldRepos(all) {
+  const repos = scanOld();
+  if (!repos.length) return true;
+  log("");
+  if (!all) {
+    log(`Still on hivemind under ${SCAN}; move each with:`);
+    for (const d of repos) log(`  cd "${d}" && node "${path.join(HERE, "install.js")}" --project`);
+    log(`or all at once: node "${path.join(HERE, "install.js")}" --migrate-all${scanFlag()}`);
+    return true;
+  }
+  let ok = true;
+  for (const d of repos) {
+    log(`migrate  -> ${d}`);
+    ok = migrateRepo(d) && ok;
+  }
+  return ok;
+}
+
 function install(opt) {
   if (!nodeOk()) die(`node ${process.versions.node} is older than ${NODE_MIN}, which the required context-mode plugin needs. Upgrade: ${nodeFix()}, then re-run`);
   const autoUpdate = opt.autoUpdate ? true : opt.noAutoUpdate ? false : undefined;
   const root = process.cwd();
-  if (opt.project && samePath(real(root), real(HERE))) die("--project sets up your repo; run it from there, not from the hivemind checkout");
+  if (opt.project && samePath(real(root), real(HERE))) die("--project sets up your repo; run it from there, not from the Proteus checkout");
   if (opt.project && samePath(real(root), real(HOME))) die("--project sets up a repo; run it from the repo root, not from your home directory");
-  const fresh = !lstat(CONFIG);
+  const fresh = !lstat(CONFIG) && !lstat(OLD_CONFIG);
+  const repoOld = opt.project ? [...migrateProject(root, false).harnesses] : [];
+  let { ok } = takeoverGlobal({ autoUpdate }, repoOld);
+  if (opt.project) ok = migrateRepo(root, opt, [HARNESS]) && ok;
+  ok = oldRepos(opt.migrateAll) && ok;
+  // a repo hivemind set up for Codex has new hook commands there: Codex asks for approval again
+  if (!codex() && repoOld.includes("codex")) withHarness("codex", () => codexSteps(root, true));
   if (codex()) {
-    let ok = codexGlobalInstall({ autoUpdate });
-    if (opt.project) ok = projectInstall(root, opt) && ok;
     codexSteps(root, opt.project);
     log("");
-    log(ok ? "Done. In codex, $hivemind (or /skills) bootstraps the rest." : "Done, with errors above.");
-    if (fresh) log("New to hivemind? Ask the hivemind skill for its tour in any repo.");
+    log(ok ? "Done. In codex, $proteus (or /skills) bootstraps the rest." : "Done, with errors above.");
+    if (fresh) log("New to Proteus? Ask the Proteus skill for its tour in any repo.");
     return ok;
   }
-  let ok = globalInstall({ autoUpdate });
-  if (opt.project) ok = projectInstall(root, opt) && ok;
   if (!teamsEnvOn()) {
     log("");
     log("Enable agent teams once, then restart the terminal:");
     log(`  ${envCommand()}`);
   }
   log("");
-  log(ok ? "Done. /hivemind bootstraps the rest." : "Done, with errors above.");
-  if (fresh) log("New to hivemind? Type /hivemind tour in any repo for a short walkthrough.");
+  log(ok ? "Done. /proteus bootstraps the rest." : "Done, with errors above.");
+  if (fresh) log("New to Proteus? Type /proteus tour in any repo for a short walkthrough.");
   return ok;
 }
 
@@ -468,7 +706,7 @@ const CHANGE = /^(feat|fix)(\([^)]*\))?!?:|^\w+(\([^)]*\))?!:/;
 function update(argv) {
   const home = real(HERE);
   const top = git(["rev-parse", "--show-toplevel"], home);
-  if (!top.ok || !samePath(real(top.out), home)) die(`${home} is not a git checkout; re-clone hivemind to update it`);
+  if (!top.ok || !samePath(real(top.out), home)) die(`${home} is not a git checkout; re-clone Proteus to update it`);
   if (git(["status", "--porcelain", "--untracked-files=no"], home).out) {
     die(`${home} has local changes; commit or stash them, then re-run (git -C "${home}" status)`);
   }
@@ -488,16 +726,18 @@ function update(argv) {
     writeJson(CONFIG, next);
   }
   // the pull may have changed this file: the new code does the install, once per recorded harness
-  // unless --harness or HIVE_HARNESS names one
+  // unless --harness or PROTEUS_HARNESS names one
   const rest = argv.filter((a) => a !== "--update");
-  const named = harnessArg || process.env.HIVE_HARNESS;
+  const named = harnessArg || process.env.PROTEUS_HARNESS;
+  migrateConfig(); // the harnesses hivemind recorded count too
   const had = (readJson(CONFIG) || {}).harnesses;
   const list = named ? [HARNESS] : Array.isArray(had) ? had.filter((h) => HARNESSES.includes(h)) : [];
   if (!list.length) list.push("claude");
   let status = 0;
   for (const h of list) {
     const args = named || h === "claude" ? [...rest] : [...rest, "--harness", h];
-    if (!args.includes("--project") && isHiveProject(process.cwd(), h) && !samePath(real(process.cwd()), home)) args.push("--project");
+    const cwd = process.cwd(), wasHive = isDir(path.join(cwd, "teams")) && HARNESSES.some((x) => isFile(path.join(cwd, `.${x}`, "hooks", "hive-autostart.js")));
+    if (!args.includes("--project") && (isProteusProject(cwd, h) || wasHive) && !samePath(real(cwd), home)) args.push("--project");
     const r = spawnSync(process.execPath, [path.join(HERE, "install.js"), ...args], { stdio: "inherit" });
     status = status || (r.status ?? 1);
   }
@@ -506,11 +746,12 @@ function update(argv) {
 
 // --tour-done: the tour ran or was skipped; the autostart offers it again only after a new feature lands
 function tourDone() {
+  migrateConfig();
   const head = git(["rev-parse", "HEAD"], real(HERE));
   const next = { ...readConfig(), toured: head.ok && head.out ? head.out : "none" };
   delete next.tourOffers;
   writeJson(CONFIG, next);
-  log(`tour     -> done${head.ok ? ` at ${head.out.slice(0, 7)}` : ""}; "tour" in a hivemind session runs it again`);
+  log(`tour     -> done${head.ok ? ` at ${head.out.slice(0, 7)}` : ""}; "tour" in a Proteus session runs it again`);
 }
 
 // doctor
@@ -539,6 +780,17 @@ async function doctor(fix) {
     ghAuthed = has("gh", ["auth", "status"]) !== null;
     return ghAuthed ? ["ok", "gh logged in"] : ["FIX", "gh not logged in", "gh auth login"];
   });
+  // hivemind, the old name: its leftovers before the install checks, which then see what the fix leaves
+  check(() => {
+    const g = oldGlobal(false);
+    if (lstat(OLD_CONFIG)) g.found.push(OLD_CONFIG);
+    if (g.found.length) return ["FIX", `hivemind leftovers: ${g.found.join(", ")}`, self];
+    return g.kept.length ? ["WARN", `hivemind's, left alone: ${g.kept.join("; ")}`, "move or delete them yourself"] : ["ok", "no hivemind leftovers"];
+  }, () => takeoverGlobal({}));
+  check(() => {
+    const repos = scanOld();
+    return repos.length ? ["WARN", `still on hivemind under ${SCAN}: ${repos.join(", ")}`, `${self} --migrate-all${scanFlag()}`] : ["ok", `no repo under ${SCAN} still on hivemind`];
+  });
   if (cxh) {
     check(() => cx().contextModeOn() ? ["ok", "context-mode (MCP server or plugin)"]
       : ["WARN", `context-mode (required) is neither an MCP server nor an installed, enabled plugin in ${path.join(cx().home, "config.toml")}`, CODEX_CTX]);
@@ -556,7 +808,7 @@ async function doctor(fix) {
     }, () => copyCodexAgents());
     check(() => {
       const { kept } = codexAgentState();
-      return kept.length ? ["WARN", `codex agents not generated by hivemind, left alone: ${kept.join(", ")}`, "delete them to use the shipped ones"] : ["ok", "no local agent overrides"];
+      return kept.length ? ["WARN", `codex agents not generated by proteus, left alone: ${kept.join(", ")}`, "delete them to use the shipped ones"] : ["ok", "no local agent overrides"];
     });
   }
   if (WIN && !cxh) {
@@ -597,9 +849,9 @@ async function doctor(fix) {
     }, () => copyAgents());
   }
   check(() => {
-    const c = readJson(path.join(CLAUDE, "hivemind.json"));
-    return c && samePath(c.home, real(HERE)) ? ["ok", `hivemind.json home, autoUpdate ${c.autoUpdate === true}`]
-      : ["FIX", "~/.claude/hivemind.json missing or points elsewhere", self];
+    const c = readJson(path.join(CLAUDE, "proteus.json"));
+    return c && samePath(c.home, real(HERE)) ? ["ok", `proteus.json home, autoUpdate ${c.autoUpdate === true}`]
+      : ["FIX", "~/.claude/proteus.json missing or points elsewhere", self];
   }, () => writeConfig());
   if (!cxh) check(() => {
     const s = readJson(path.join(CLAUDE, "settings.json"));
@@ -608,7 +860,7 @@ async function doctor(fix) {
     return a && a.commit === "" && a.pr === "" ? ["ok", "attribution off"] : ["FIX", "attribution not disabled", self];
   }, () => setAttribution());
 
-  // skill copies in this dir or a parent (below $HOME) show /hivemind twice
+  // skill copies in this dir or a parent (below $HOME) show /proteus twice
   const dirs = [];
   for (let d = root; ; d = path.dirname(d)) {
     if (samePath(real(d), real(HOME))) break;
@@ -625,7 +877,7 @@ async function doctor(fix) {
   });
 
   if (!inRepo) {
-    const where = top.ok ? "in the hivemind checkout" : "not inside a git repo";
+    const where = top.ok ? "in the Proteus checkout" : "not inside a git repo";
     check(() => ["WARN", `${where}; project checks skipped`, "cd into your repo and re-run"]);
   } else {
     check(() => {
@@ -635,15 +887,20 @@ async function doctor(fix) {
       const r = spawnSync("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], { cwd: root, encoding: "utf8", shell: WIN, timeout: 20000 });
       return r.status === 0 ? ["ok", `GitHub repo ${r.stdout.trim()}`] : ["FIX", "gh repo view fails for this repo's remote", "git remote -v; gh repo view"];
     });
+    check(() => {
+      const m = migrateProject(root, false);
+      if (m.found.length) return ["FIX", `hivemind's pieces in this repo: ${m.found.join(", ")}`, `${self} --project`];
+      return m.kept.length ? ["WARN", `hivemind's, left alone in this repo: ${m.kept.join("; ")}`, "move, edit or delete them yourself"] : ["ok", "no hivemind pieces in this repo"];
+    }, () => migrateRepo(root, {}, [HARNESS]));
     if (!hive) {
-      check(() => ["WARN", "not a hivemind project (no teams/)", `${self} --project`]);
+      check(() => ["WARN", "not a Proteus project (no teams/)", `${self} --project`]);
     } else {
       check(() => isFile(path.join(root, "teams", "ROUTING.md")) ? ["ok", "teams/ROUTING.md"]
         : ["WARN", "teams/ROUTING.md missing", `${self} --project`]);
       check(() => {
         const s = readJson(path.join(root, ...(cxh ? [".codex", "hooks.json"] : [".claude", "settings.local.json"])));
         const hooks = JSON.stringify((s && s.hooks) || {});
-        const miss = ["hive-autostart.js", "hive-lead-guard.js"].filter((f) => !hooks.includes(f) || !isFile(path.join(root, hd, "hooks", f)));
+        const miss = ["proteus-autostart.js", "proteus-lead-guard.js"].filter((f) => !hooks.includes(f) || !isFile(path.join(root, hd, "hooks", f)));
         return miss.length ? ["FIX", `lead hooks not registered: ${miss.join(", ")}`, `${self} --project`] : ["ok", "lead hooks registered"];
       }, () => registerHooks(root));
       if (cxh) {
@@ -651,8 +908,8 @@ async function doctor(fix) {
           const left = cx().skipHooks.filter((f) => lstat(path.join(root, hd, "hooks", f)));
           return left.length ? ["FIX", `Claude-only files in .codex/hooks: ${left.join(", ")}`, `${self} --project`] : ["ok", "no Claude-only files in .codex/hooks"];
         }, () => registerHooks(root));
-        check(() => readText(path.join(root, ".codex", "rules", "hivemind.rules")) === cx().RULES ? ["ok", ".codex/rules/hivemind.rules"]
-          : ["FIX", ".codex/rules/hivemind.rules missing or stale", `${self} --project`], () => registerHooks(root));
+        check(() => readText(path.join(root, ".codex", "rules", "proteus.rules")) === cx().RULES ? ["ok", ".codex/rules/proteus.rules"]
+          : ["FIX", ".codex/rules/proteus.rules missing or stale", `${self} --project`], () => registerHooks(root));
         check(() => {
           const w = cx().sandboxRoots(root, false);
           if (w.error) return ["FIX", w.error.replace(/; add .*/, ""), `add ${w.dir} to writable_roots under [sandbox_workspace_write] in .codex/config.toml`];
@@ -663,10 +920,10 @@ async function doctor(fix) {
           : ["WARN", "project not trusted in codex: its .codex/ hooks do not load", "open codex here, trust the project, approve the hooks in /hooks"]);
       }
       check(() => {
-        const r = spawnSync(process.execPath, [path.join(HERE, "templates", "hooks", "hive-scratch.js"), "--size"], { cwd: root, encoding: "utf8", timeout: 60000 });
+        const r = spawnSync(process.execPath, [path.join(HERE, "templates", "hooks", "proteus-scratch.js"), "--size"], { cwd: root, encoding: "utf8", timeout: 60000 });
         const mb = parseFloat(r.stdout);
-        if (r.status !== 0 || !Number.isFinite(mb)) return ["WARN", "scratch size unknown", `node ${hd}/hooks/hive-scratch.js --size`];
-        return mb > 1024 ? ["WARN", `hive scratch holds ${mb} MB`, `node ${hd}/hooks/hive-scratch.js --sweep --all-done`] : ["ok", `hive scratch ${mb} MB`];
+        if (r.status !== 0 || !Number.isFinite(mb)) return ["WARN", "scratch size unknown", `node ${hd}/hooks/proteus-scratch.js --size`];
+        return mb > 1024 ? ["WARN", `hive scratch holds ${mb} MB`, `node ${hd}/hooks/proteus-scratch.js --sweep --all-done`] : ["ok", `hive scratch ${mb} MB`];
       });
       check(() => {
         const teams = path.join(root, "teams");
@@ -715,7 +972,7 @@ async function doctor(fix) {
 const FLAGS = {
   "--project": "project", "--install": "install", "--confine": "confine", "--update": "update",
   "--doctor": "doctor", "--fix": "fix", "--auto-update": "autoUpdate", "--no-auto-update": "noAutoUpdate",
-  "--tour-done": "tourDone",
+  "--tour-done": "tourDone", "--migrate-all": "migrateAll",
 };
 const argv = process.argv.slice(2);
 const opt = {};
@@ -727,6 +984,12 @@ for (let i = 0; i < argv.length; i++) {
     if (!harnessArg) die(`--harness needs a value: ${HARNESSES.join(" or ")}`, 2);
     continue;
   }
+  if (a === "--scan" || a.startsWith("--scan=")) {
+    const d = a === "--scan" ? argv[++i] : a.slice("--scan=".length);
+    if (!d) die("--scan needs a directory", 2);
+    SCAN = path.resolve(d);
+    continue;
+  }
   if (a === "-h" || a === "--help") {
     const lines = fs.readFileSync(__filename, "utf8").split(/\r?\n/).slice(1);
     console.log(lines.slice(0, lines.findIndex((l) => !l.startsWith("//"))).map((l) => l.slice(3)).join("\n"));
@@ -735,12 +998,12 @@ for (let i = 0; i < argv.length; i++) {
   if (!FLAGS[a]) die(`unknown flag: ${a} (--help lists them)`, 2);
   opt[FLAGS[a]] = true;
 }
-HARNESS = String(harnessArg || process.env.HIVE_HARNESS || "claude").toLowerCase();
+HARNESS = String(harnessArg || process.env.PROTEUS_HARNESS || "claude").toLowerCase();
 if (!HARNESSES.includes(HARNESS)) die(`unknown harness: ${HARNESS} (${HARNESSES.join(" or ")})`, 2);
 if ((opt.install || opt.confine) && !opt.project) die("--install/--confine need --project", 2);
 if (opt.confine && codex()) die("--confine hides skills from Claude Code only; Codex reads ~/.agents/skills itself", 2);
 if (opt.fix && !opt.doctor) die("--fix needs --doctor", 2);
-if (opt.doctor && Object.keys(opt).some((k) => k !== "doctor" && k !== "fix")) die("--doctor takes only --fix", 2);
+if (opt.doctor && Object.keys(opt).some((k) => k !== "doctor" && k !== "fix")) die("--doctor takes only --fix and --scan", 2);
 if (opt.tourDone && Object.keys(opt).length > 1) die("--tour-done takes no other flag", 2);
 if (opt.autoUpdate && opt.noAutoUpdate) die("--auto-update and --no-auto-update conflict", 2);
 

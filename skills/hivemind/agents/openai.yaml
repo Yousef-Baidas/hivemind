@@ -1,4 +1,0 @@
-# Codex reads this; the Claude Code equivalent is disable-model-invocation in SKILL.md.
-# The human starts the skill ($hivemind); the model never picks it on its own.
-policy:
-  allow_implicit_invocation: false

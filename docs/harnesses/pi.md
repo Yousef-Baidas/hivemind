@@ -34,7 +34,7 @@
 - Context object (ExtensionContext): `cwd`, `model`, `thinkingLevel`, `mode` (tui|rpc|json|print), `hasUI`, `ui`, `sessionManager` (getSessionId(), getSessionFile(), getCwd(), getBranch()), `modelRegistry`, `signal`, `getContextUsage()`, `compact()`, `shutdown()`, `getSystemPrompt()`, `isProjectTrusted()`. Session-control on `pi`: setModel, setActiveTools, sendUserMessage, sendMessage, appendEntry, registerTool/Command/Flag/Shortcut/Provider.
 - Tools: `pi.registerTool` (TypeBox schema, execute, `exposure` direct|model-only|codemode|deferred|hidden, `annotations`); can wrap/override built-in (example tool-override.ts).
 
-## Notes for the hivemind port
+## Notes for the Proteus port
 - Worker per-model ladder: spawn `pi -p --mode json --model provider/id[:level] --session-id X` (or RPC/SDK) per worktree with cwd = worktree; a lead extension can enforce the ladder by `tool_call` blocking on the spawn tool and by reading `ctx.model` in it (cap check). Models are not tied to agent files natively; the example subagent supports frontmatter `model:`.
 - Enforcement hooks must be TS in-process; rewrite shell-hook logic. Blocking reason -> returned to the model as tool error (reason field).
 - Extensions cannot be forced on children unless passed with `-e` (or via project .pi/extensions after trust; `-a/--approve` trusts project files for one command).

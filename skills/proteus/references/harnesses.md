@@ -1,0 +1,35 @@
+# Harnesses
+
+The skill is written in Claude Code's names. On Codex CLI (you spawn with `spawn_agent`, hooks live in `.codex/hooks`) read this once per session and translate every name below; the pipeline, the rules, and the tracker do not change. The hooks pick their adapter by where they are installed; `proteus-harness.js` in the hooks folder holds the contract, `docs/harnesses.md` in the Proteus checkout the details.
+
+| Thing | Claude Code | Codex CLI |
+|---|---|---|
+| Invoke a skill | `/proteus`, `/proteus-review`, `/<skill>` | `$proteus`, `$proteus-review`, `$<skill>` |
+| Skills folders | `~/.claude/skills`, `.claude/skills`, plugin caches | `~/.agents/skills`, `.agents/skills`; no Skill tool, every skill is read from its `SKILL.md` and followed. Codex ignores `disable-model-invocation`; its equivalent, `policy.allow_implicit_invocation: false` in the skill's `agents/openai.yaml` (Proteus and proteus-review ship one), only hides a skill from the model's list. Team skills: `teams/<team>/.agents/skills/`, read by the worker itself (`teams.md`) |
+| Project instructions | `CLAUDE.md` (and `AGENTS.md`) | `AGENTS.md` only; `docs-diet.md`'s `CLAUDE.md` rules apply to it |
+| `<hooks>`: hooks and lead scripts | `.claude/hooks` | `.codex/hooks` |
+| Owned-paths file | `<wt>/.claude/proteus-owned` | `<wt>/.codex/proteus-owned` (read-only to the worker's sandbox) |
+| Worktree folder `../<repo>-hive/` | writable | writable because `install.js --project --harness codex` adds it to `[sandbox_workspace_write] writable_roots` in `.codex/config.toml`; `--doctor` checks it |
+| Lead hook registration | `.claude/settings.local.json` | `.codex/hooks.json` plus `.codex/rules/proteus.rules`; the human trusts the project and approves the hooks in `/hooks` once |
+| Plain session, no lead hooks | `PROTEUS=0 claude` | `PROTEUS=0 codex` |
+| Agent definitions | `.claude/agents/*.md`; a project may pin tools or a model | TOML roles in `$CODEX_HOME/agents`, no model and no tool limits: verifiers stay read-only by instruction only |
+| Spawn | `Agent` with `subagent_type`, `model`, prompt | `spawn_agent` with `agent_type`, `model`, `message` (v2 prefixes the name, e.g. `collaborationspawn_agent`) |
+| Worker's directory | named in the brief | same, and nothing else sets it: the brief gives the worktree's absolute path; every shell call sets the shell tool's `workdir` to it, every patch names absolute paths under it |
+| `git`, `gh`, lead scripts | run as usual | the sandbox has no network and keeps a worktree's gitdir read-only; `.codex/rules/proteus.rules` lets a command out only when every segment matches a rule (`git <subcommand>` for the writing ones, `gh`, `node .codex/hooks/<script>` relative from the repo root). Plain words joined by `&&`, `\|\|`, `;`, `\|` are split and checked one by one; `$(…)`, `$var`, a redirect, or one unmatched segment (`cd`, `tail`, `sleep`) keeps the whole command sandboxed. So set the directory with `workdir`, never `cd <dir> && git …` or `git -C` (they fail on `index.lock`), and do not pipe `gh` into a filter: use its `-q` |
+| Wait for a report | it arrives as a notification | `wait_agent` |
+| Wait for a review verdict | the background poll in `tracker.md` | no poll: its loop is not a plain `gh` command, so it runs sandboxed without network. Run the single `gh issue view <n> --json comments -q …` check; no verdict → end the turn with the review url and "type `reviewed` here once the verdict is posted". Unattended: `wait_agent` on the guide, whose `AUTO-` verdict is the answer |
+| Message a running agent | `SendMessage` | `send_message` |
+| Stop an agent | `TaskStop` | `close_agent` |
+| Running agents (`status`, `pause`) | the task list | the agents you spawned and have not closed |
+| Edit a file | `Edit`, `Write` | `apply_patch`; one patch may touch several files, and one unowned path denies the whole patch (lead's hooks, subagents included) |
+| Read a file or image | `Read` | the shell, `view_image`; the guard refuses `view_image` like `Read` of an image |
+| Shell | `Bash`, `run_in_background` for a background shell | `exec_command` returns after `yield_time_ms` (default 10 s, at most 30 s) with a session id while the command keeps running, with no overall time limit; `write_stdin` with empty input polls it, each poll waiting up to 5 minutes (`background_terminal_max_timeout`). The hooks see none of this, so a command left running past the turn is the background shell the long-jobs rule forbids |
+| Ask the human (the run cannot move) | `AskUserQuestion`, pinned picker | plain numbered questions in chat, one to four, numbered options, recommendation first and marked; wait for the reply (the picker exists only in Plan mode) |
+| Notify | `PushNotification` | none; the chat line and the question or review issue are the notice |
+| Status line | `proteus-statusline.js` shows `hive: N questions · M reviews` | none; `inbox=<q>q/<r>r` in `proteus-state` at session start and the journal's reminder carry it |
+| Stall-check timer | `CronCreate` every 20 minutes | none; `wait_agent` with `timeout_ms: 1200000` (10 s to 1 h, default 30 s) returns early when an agent finishes, else at the timeout; each return without a report is a fire |
+| Hooks that cannot fire | – | failed-tool and teammate-idle events; a background shell is invisible to the hooks, so the long-jobs rule is prompt-only |
+| Model ladder | default `haiku < sonnet < opus < fable`, floor Haiku, Fable once per project | none: `models=unknown`, every spawn names your own model, until `models.ladder` in `~/.claude/proteus.json` or a `models:` line in `AGENTS.md` names the rungs |
+| Cost at close | `npx ccusage@latest session --json` | `npx @ccusage/codex@latest session --json` |
+| AI commit trailer | off via `attribution` in `~/.claude/settings.json` (`commits.md`) | no setting (a ChatGPT account option may add one); the commit-msg hook is the gate |
+| Review from the phone | `/remote-control` | none; the GitHub app |

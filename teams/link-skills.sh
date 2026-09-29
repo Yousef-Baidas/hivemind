@@ -11,5 +11,5 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 command -v node >/dev/null 2>&1 || { echo "node not found; install Node 18+ and re-run" >&2; exit 1; }
-[[ -f "$HERE/link-skills.js" ]] || { echo "$HERE/link-skills.js missing; re-run hivemind's install.sh --project" >&2; exit 1; }
+[[ -f "$HERE/link-skills.js" ]] || { echo "$HERE/link-skills.js missing; re-run Proteus's install.sh --project" >&2; exit 1; }
 exec node "$HERE/link-skills.js" "$@"

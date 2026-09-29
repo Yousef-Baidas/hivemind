@@ -1,4 +1,4 @@
-# shipped default; hive-scout replaces this list for your stack. <owner/repo> <skill-name> per line.
-# Defaults below are a starting set. hive-scout rewrites this file for your stack
+# shipped default; proteus-scout replaces this list for your stack. <owner/repo> <skill-name> per line.
+# Defaults below are a starting set. proteus-scout rewrites this file for your stack
 # from https://skills.sh (ranked by installs) during bootstrap; human approves the list.
 github/awesome-copilot multi-stage-dockerfile

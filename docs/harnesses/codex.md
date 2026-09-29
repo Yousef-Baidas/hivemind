@@ -50,7 +50,7 @@ Output (stdout JSON): `continue, stopReason, systemMessage, suppressOutput, deci
 Exit 0 + empty = continue. Exit 2 + stderr = block/continue-with-reason (PreToolUse, PostToolUse, UserPromptSubmit, Stop, SubagentStop). Context returned is capped ~2,500 tokens (spills to `<tmp>/hook_outputs/<session>/<uuid>.txt`; raise via `additionalContextLimit`).
 Multiple matching hooks run CONCURRENTLY (so ordering-dependent chains are not possible). Project hooks load only in trusted projects.
 
-## 3. Notes and gotchas for a hivemind port
+## 3. Notes and gotchas for a Proteus port
 
 - Claude-Code-hook parity is the best news: event names (`PreToolUse`, `PostToolUse`, `SessionStart`, `UserPromptSubmit`, `Stop`, `SubagentStop`, `PreCompact`), matcher-regex semantics, exit-2 blocking, `additionalContext`, `stop_hook_active` anti-loop all match. Differences: config lives in `.codex/hooks.json` / config.toml, tool names are `Bash`, `apply_patch` (matched also as `Edit`/`Write`; input is a patch in `tool_input.command`, not `file_path`), `Agent` alias for `spawn_agent`; hook trust review step; `PreToolUse` cannot `ask`.
 - Model-ladder enforcement: lead's model cap could be enforced by a PreToolUse hook on matcher `Agent`/`spawn_agent` inspecting `tool_input.model`/`reasoning_effort` (deny with reason). Inference; not verified end to end.
