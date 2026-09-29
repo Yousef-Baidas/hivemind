@@ -54,4 +54,11 @@ ok(".claude/hooks/proteus-autostart.js exists in the checkout", fs.existsSync(pa
 ok("teams/templates is ignored by git", git(["check-ignore", "-q", "teams/templates"]).status === 0);
 ok("no nested roster copy at teams/templates/teams", !fs.existsSync(path.join(CLONE, "teams", "templates", "teams")));
 
+// the move itself (#4 amendment): git tracks the shipped roster under templates/teams and nothing under teams/
+const shipped = (git(["ls-files", "templates/teams"]).stdout || "").split("\n").filter(Boolean);
+const want = ["ROUTING.md", ...["backend", "devops", "frontend", "qa", "security"].map((t) => `${t}/PROFILE.md`)].map((f) => `templates/teams/${f}`);
+ok("git ls-files templates/teams lists ROUTING.md and each team's PROFILE.md", want.every((f) => shipped.includes(f)), want.filter((f) => !shipped.includes(f)).join(", "));
+const own = git(["ls-files", "teams"]);
+ok("git ls-files teams is empty", own.status === 0 && !own.stdout.trim(), own.stdout || own.stderr);
+
 summary();
