@@ -8,7 +8,7 @@ const { spawnSync, execFileSync } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
 const SRC = path.join(ROOT, "templates", "hooks");
-const lib = require("./lib");
+const lib = require(path.join(__dirname, "lib.js"));
 const { ok, g } = lib;
 const W = lib.workdir("hooks");
 const { HOME, BIN, ENV } = lib;
