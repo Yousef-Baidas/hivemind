@@ -185,7 +185,7 @@ function setAttribution() {
     warn('  "attribution": { "commit": "", "pr": "", "sessionUrl": false }');
     return false;
   }
-  const want = { ...(s.attribution || {}), commit: "", pr: "", sessionUrl: false };
+  const want = { ...s.attribution, commit: "", pr: "", sessionUrl: false };
   if (JSON.stringify(s.attribution) !== JSON.stringify(want)) { s.attribution = want; writeJson(file, s); }
   log("settings -> attribution disabled");
   return true;
@@ -721,7 +721,8 @@ function update(argv) {
     if (news.length > 12) log(`  … ${news.length - 12} more: git -C "${home}" log ${before.slice(0, 7)}..`);
     // an install from before the tour existed gets a what's-new tour from here, not a first-time one
     const c = readConfig();
-    const next = { ...c, ...(c.toured === undefined ? { toured: before } : {}) };
+    const next = { ...c };
+    if (c.toured === undefined) next.toured = before;
     delete next.behind;
     writeJson(CONFIG, next);
   }
