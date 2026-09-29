@@ -300,12 +300,28 @@ function projectDupes(dir, act) {
     const p = path.join(dir, ".claude", "agents", f);
     const t = readText(p);
     if (t === null) continue;
-    if (norm(t) === norm(fs.readFileSync(path.join(HERE, "agents", f), "utf8"))) {
+    if (norm(t) === norm(fs.readFileSync(path.join(HERE, "agents", f), "utf8")) || pastAgent(f, t)) {
       dupes.push(p);
       if (act) { if (lstat(p).isSymbolicLink()) removeLink(p); else fs.unlinkSync(p); }
     } else overrides.push(p);
   }
   return { dupes, overrides };
+}
+
+// an agent file identical to a version this checkout once shipped is an old installer's copy,
+// not an edit; needs the checkout's git history, so a non-git copy of hivemind never matches
+const pastHashes = {};
+function pastAgent(f, text) {
+  const hash = (s) => crypto.createHash("sha256").update(norm(s).trimEnd()).digest("hex");
+  if (!pastHashes[f]) {
+    pastHashes[f] = new Set();
+    const commits = git(["log", "--format=%H", "--", `agents/${f}`], HERE);
+    for (const c of commits.ok ? commits.out.split("\n").filter(Boolean) : []) {
+      const r = spawnSync("git", ["show", `${c}:agents/${f}`], { cwd: HERE, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      if (r.status === 0) pastHashes[f].add(hash(r.stdout));
+    }
+  }
+  return pastHashes[f].has(hash(text));
 }
 
 function registerHooks(root) {
