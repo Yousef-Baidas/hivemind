@@ -92,26 +92,94 @@ function legacyWorktrees(root) {
   return out;
 }
 
-// move legacyStateDir's contents into stateDir: never overwrites, merges directories, drops the legacy dir
-// once empty. {moved, kept} are paths relative to the legacy dir; kept ones exist on both sides.
-// dry: only report what a move would do.
+const realOr = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+const within = (dir, p) => { const r = path.relative(dir, p); return r === "" || (r !== ".." && !r.startsWith(".." + path.sep) && !path.isAbsolute(r)); };
+
+// every worktree git has registered, as real paths: <common>/worktrees/*/gitdir, no git call
+function registeredWorktrees(common) {
+  let ids = [];
+  try { ids = fs.readdirSync(path.join(common, "worktrees")); } catch { return []; }
+  const out = [];
+  for (const id of ids) {
+    try { out.push(realOr(path.dirname(path.resolve(fs.readFileSync(path.join(common, "worktrees", id, "gitdir"), "utf8").trim())))); } catch {}
+  }
+  return out;
+}
+
+// something is at the target now: the entry stays where it is (kept), never replaces it
+const TAKEN = new Set(["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR"]);
+// a filesystem with no hard links: copy instead, still refusing an existing target
+const NO_LINK = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV", "EMLINK"]);
+
+// one entry into a spot found empty. A file goes by link then unlink and a symlink is recreated (never
+// followed), so a file that appeared there meanwhile fails with EEXIST instead of being replaced; a
+// directory is renamed, which a non-empty target refuses. If the source cannot be unlinked, the copy goes.
+function moveEntry(s, d, st) {
+  if (st.isDirectory()) { fs.renameSync(s, d); return; }
+  if (st.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(s), d);
+  else {
+    try { fs.linkSync(s, d); } catch (e) {
+      if (!NO_LINK.has(e.code)) throw e;
+      fs.copyFileSync(s, d, fs.constants.COPYFILE_EXCL);
+    }
+  }
+  try { fs.unlinkSync(s); } catch (e) { try { fs.unlinkSync(d); } catch {} throw e; }
+}
+
+// an append-only log on both sides: the legacy lines first, then the current file's lines not among them,
+// written to a temp file beside the current one and renamed over it; the legacy file goes only after that.
+// A line appended to the current file meanwhile aborts the pass (a rerun merges again, each line once).
+function mergeLog(s, d) {
+  const old = fs.readFileSync(s, "utf8").split("\n").filter(Boolean);
+  const cur = fs.readFileSync(d, "utf8");
+  const seen = new Set(old);
+  const all = [...old, ...cur.split("\n").filter((l) => l && !seen.has(l))];
+  const tmp = `${d}.${process.pid}.${Date.now()}.merge.tmp`;
+  fs.writeFileSync(tmp, all.length ? all.join("\n") + "\n" : "", { flag: "wx" });
+  try {
+    if (fs.readFileSync(d, "utf8") !== cur) throw Object.assign(new Error("appended during the merge"), { code: "EAGAIN" });
+    fs.renameSync(tmp, d);
+  } catch (e) { try { fs.unlinkSync(tmp); } catch {} throw e; }
+  fs.unlinkSync(s); // a regular file (lstat) in a tree whose every dir was lstat-checked under the legacy dir
+}
+
+// move legacyStateDir's contents into stateDir; the legacy dir goes once empty. Paths are relative to it:
+// moved: now in stateDir; merged: a *.jsonl log on both sides, appended into stateDir's (older lines first);
+// kept: another file already in stateDir, never overwritten; held: a worktree git has registered, left where
+// git has it; failed: "<path> (<code>)", unreadable or not movable now (a rerun retries). dry: only report.
 function migrateState(common, dry) {
-  const res = { moved: [], kept: [] };
+  const res = { moved: [], merged: [], kept: [], held: [], failed: [] };
   const from = common && legacyStateDir(common);
-  if (!from || !fs.existsSync(from) || !fs.lstatSync(from).isDirectory()) return res;
+  let top = null;
+  try { top = from && fs.lstatSync(from); } catch {}
+  if (!top || !top.isDirectory()) return res;
+  const wts = registeredWorktrees(common);
+  const fail = (r, e) => res.failed.push(`${r} (${(e && e.code) || "error"})`);
   const walk = (src, dst, rel) => {
     let names = [];
-    try { names = fs.readdirSync(src).sort(); } catch { return; }
+    try { names = fs.readdirSync(src).sort(); } catch (e) { if (rel) fail(rel, e); return; }
     for (const n of names) {
       const s = path.join(src, n), d = path.join(dst, n), r = rel ? `${rel}/${n}` : n;
-      let ds = null;
+      let ss, ds = null;
+      try { ss = fs.lstatSync(s); } catch (e) { fail(r, e); continue; } // gone or unreachable since the listing
       try { ds = fs.lstatSync(d); } catch {}
-      if (!ds) {
-        if (dry) { res.moved.push(r); continue; }
-        try { fs.mkdirSync(dst, { recursive: true }); fs.renameSync(s, d); res.moved.push(r); } catch { res.kept.push(r); }
-      } else if (ds.isDirectory() && fs.lstatSync(s).isDirectory()) {
+      const real = ss.isDirectory() && wts.length ? realOr(s) : "";
+      if (real && wts.includes(real)) { res.held.push(r); continue; }
+      if (real && wts.some((w) => within(real, w))) {
+        // a worktree is inside: move the rest around it
+        if (ds && !ds.isDirectory()) { res.kept.push(r); continue; }
+        if (!dry && !ds) try { fs.mkdirSync(d, { recursive: true }); } catch (e) { fail(r, e); continue; }
         walk(s, d, r);
         if (!dry) try { fs.rmdirSync(s); } catch {}
+      } else if (!ds) {
+        if (dry) { res.moved.push(r); continue; }
+        try { fs.mkdirSync(dst, { recursive: true }); moveEntry(s, d, ss); res.moved.push(r); } catch (e) { if (TAKEN.has(e.code)) res.kept.push(r); else fail(r, e); }
+      } else if (ds.isDirectory() && ss.isDirectory()) {
+        walk(s, d, r);
+        if (!dry) try { fs.rmdirSync(s); } catch {}
+      } else if (ds.isFile() && ss.isFile() && n.endsWith(".jsonl")) {
+        if (dry) { res.merged.push(r); continue; }
+        try { mergeLog(s, d); res.merged.push(r); } catch (e) { fail(r, e); }
       } else res.kept.push(r);
     }
   };

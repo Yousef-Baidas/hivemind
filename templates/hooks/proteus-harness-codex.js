@@ -330,19 +330,20 @@ function sandboxRoots(root, write = true) {
   let i = text.indexOf("=", start) + 1;
   while (/[ \t]/.test(text[i] || "")) i++;
   if (text[i] !== "[") return refuse("sets writable_roots to something other than an array");
-  const open = i;
-  const vals = [];
+  // values and commas as tokens with their offsets; comments and whitespace are skipped, never edited
+  const vals = [], toks = [];
   for (i++; i < text.length; i++) {
     const c = text[i];
     if (/\s/.test(c)) continue;
     if (c === "#") { while (i < text.length && text[i] !== "\n") i++; continue; }
     if (c === "]") break;
-    if (c === ",") continue;
+    if (c === ",") { toks.push({ comma: true, start: i, end: i + 1 }); continue; }
     const m = c === '"' ? /^"((?:[^"\\\n]|\\.)*)"/.exec(text.slice(i)) : c === "'" ? /^'([^'\n]*)'/.exec(text.slice(i)) : null;
     if (!m) return refuse("has a writable_roots value this installer cannot read");
     let v = m[1];
     if (c === '"') { try { v = JSON.parse(`"${v}"`); } catch {} }
-    vals.push({ v, start: i, end: i + m[0].length }); i += m[0].length - 1;
+    const x = { v, start: i, end: i + m[0].length };
+    vals.push(x); toks.push(x); i += m[0].length - 1;
   }
   if (text[i] !== "]") return refuse("has an unterminated writable_roots array");
   const old = legacyWorktreeDir(abs);
@@ -357,20 +358,22 @@ function sandboxRoots(root, write = true) {
     return { file, dir, created: false, changed: false, legacy };
   }
   if (!write) return { file, dir, missing: !has, stale, legacy };
-  // the stale entries go with one comma beside each, then ours goes in before the ]
-  let next = text, shut = i;
-  for (const x of [...drop].reverse()) {
-    let a = x.start, b = x.end;
-    const after = /^[ \t]*,[ \t]*/.exec(next.slice(b));
-    const before = !after && /,\s*$/.exec(next.slice(0, a));
-    if (after) b += after[0].length;
-    else if (before) a -= before[0].length;
-    next = next.slice(0, a) + next.slice(b);
-    shut -= b - a;
+  // each stale entry goes with one comma token beside it (the next, else the one before), so the rest stays
+  // comma-separated and a comment between them stays put; ours goes in before the ], after a comma when the
+  // last token left is a value. Tokens, not text: a `#` or `,` inside a string is never read as syntax.
+  const gone = new Set();
+  for (const x of drop) {
+    const j = toks.indexOf(x), after = toks[j + 1], before = toks[j - 1];
+    gone.add(x);
+    if (after && after.comma && !gone.has(after)) gone.add(after);
+    else if (before && before.comma && !gone.has(before)) gone.add(before);
   }
-  if (!has) {
-    const body = next.slice(open + 1, shut).split("\n").map((l) => l.replace(/#.*$/, "")).join("\n").trim();
-    next = `${next.slice(0, shut)}${body && !body.endsWith(",") ? ", " : ""}${entry}${next.slice(shut)}`;
+  const left = toks.filter((t) => !gone.has(t));
+  let next = text;
+  if (!has) next = `${next.slice(0, i)}${left.length && !left[left.length - 1].comma ? ", " : ""}${entry}${next.slice(i)}`;
+  for (const t of [...gone].sort((a, b) => b.start - a.start)) {
+    const pad = /^[ \t]*/.exec(next.slice(t.end))[0].length; // the blanks after it go too
+    next = next.slice(0, t.start) + next.slice(t.end + pad);
   }
   fs.writeFileSync(file, next);
   fs.mkdirSync(dir, { recursive: true });

@@ -540,15 +540,26 @@ const commonDir = (root) => { const x = git(["rev-parse", "--git-common-dir"], r
 const legacyState = (root) => { const c = commonDir(root), d = c && hl().legacyStateDir(c); return d && isDir(d) ? d : null; };
 
 // state a pre-rename install left in the legacy state dir moves into <git-common-dir>/proteus,
-// never over a file already there; what stays is named here and by --doctor
+// never over a file already there (the *.jsonl logs merge); what stays is named here and by --doctor
 function migrateState(root) {
   const common = commonDir(root);
   if (!common) return;
   const lib = hl();
   const from = path.relative(root, lib.legacyStateDir(common)), to = path.relative(root, lib.stateDir(common));
-  const r = lib.migrateState(common);
+  let r;
+  try { r = lib.migrateState(common); } catch (e) { warn(`warning: ${from} not moved: ${e.message}; install.js --doctor names what is left`); return; }
   if (r.moved.length) log(`state    -> ${from} moved into ${to} (${r.moved.join(", ")})`);
-  if (r.kept.length) warn(`kept     ${from}: ${r.kept.join(", ")} (already in ${to}); compare each pair, keep one in ${to}, then delete ${from}`);
+  if (r.merged.length) log(`state    -> ${from}: ${r.merged.join(", ")} appended into ${to} (older lines first, each line once)`);
+  for (const line of stateLeft(r, from, to)) warn(line);
+}
+
+// what a state migration left in the legacy dir, and why, one line each
+function stateLeft(r, from, to) {
+  return [
+    r.kept.length && `kept     ${from}: ${r.kept.join(", ")} (also in ${to}, whose copy is the one in use; delete the old copy once you have compared them)`,
+    r.held.length && `kept     ${from}: ${r.held.join(", ")} (a registered git worktree, left where git has it; the rest moves once \`git worktree remove\` drops it)`,
+    r.failed.length && `failed   ${from}: ${r.failed.join(", ")} (not movable now; the next --project retries)`,
+  ].filter(Boolean);
 }
 
 // takeover: Proteus was called hivemind. An install removes only what hivemind's installs
@@ -1001,8 +1012,9 @@ async function doctor(fix) {
       if (!d) return ["ok", "no pre-rename state dir"];
       const common = commonDir(root), to = path.relative(root, hl().stateDir(common)), from = path.relative(root, d);
       const plan = hl().migrateState(common, true);
-      if (plan.moved.length || !plan.kept.length) return ["FIX", `${from} still holds pre-rename state (${plan.moved.join(", ") || "empty"})`, `${self} --project`];
-      return ["WARN", `${from} left beside ${to}: ${plan.kept.join(", ")} in both`, `compare each pair, keep one in ${to}, then delete ${from}`];
+      const todo = [...plan.moved, ...plan.merged.map((x) => `${x} to merge`)];
+      if (todo.length || !(plan.kept.length + plan.held.length + plan.failed.length)) return ["FIX", `${from} still holds pre-rename state (${todo.join(", ") || "empty"})`, `${self} --project`];
+      return ["WARN", `${from} left beside ${to}: ${stateLeft(plan, from, to).map((l) => l.replace(/^\w+\s+[^:]+: /, "")).join("; ")}`, "the reason beside each says what to do"];
     }, () => migrateState(root));
     if (!isProject) {
       check(() => ["WARN", "not a Proteus project (no teams/)", `${self} --project`]);
