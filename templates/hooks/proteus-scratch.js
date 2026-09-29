@@ -194,19 +194,16 @@ function removeWorktree(p, prune) {
 }
 
 // a key is done once its proteus/<key> branch is gone: `gh pr merge --delete-branch` drops a ticket's,
-// close drops the run's. Unkeyed strays are done when no proteus/* branch is left.
+// close drops the run's. Unkeyed strays are done when no proteus/* branch is left. A run opened
+// before the rename counts on its legacy branch (lib.runRefs reads both prefixes).
 function doneFn(common) {
   const branches = runBranches(common);
   return (key) => (key ? !branches.has(key) : branches.size === 0);
 }
 
-// proteus/* branch names without the prefix: loose refs and packed-refs, no git call
+// run and worker branch names without their prefix, either scheme: loose refs and packed-refs, no git call
 function runBranches(common) {
-  const set = new Set(ls(path.join(common, "refs", "heads", "proteus")));
-  let packed = "";
-  try { packed = fs.readFileSync(path.join(common, "packed-refs"), "utf8"); } catch {}
-  for (const m of packed.matchAll(/^\S+ refs\/heads\/proteus\/([^/\s]+)$/gm)) set.add(m[1]);
-  return set;
+  return new Set(lib.runRefs(common).map(lib.runName));
 }
 
 // the stray's key: the agent's own --path, else its cwd's proteus/* branch, else the one open run, else ""
@@ -214,7 +211,7 @@ function keyOf(ev, who, rows, common) {
   const bound = rows.filter((r) => r.bind === who).pop();
   if (bound && KEY.test(bound.key)) return bound.key;
   const b = branchOf(ev.cwd || lib.projectRoot(ev));
-  if (b.startsWith("proteus/") && KEY.test(b.slice(8))) return b.slice(8);
+  if (lib.schemeOf(b) && KEY.test(lib.runName(b))) return lib.runName(b);
   const names = [...runBranches(common)];
   const runs = names.filter((b2) => !names.some((a) => a !== b2 && b2.startsWith(a + "-")));
   return runs.length === 1 ? runs[0] : "";

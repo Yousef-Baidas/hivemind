@@ -22,6 +22,7 @@ const ALLOW = [
   { file: "install.js", why: "takeover through oldRepos", from: /^\/\/ takeover: Proteus was called hivemind\./, before: /^function install\(/ },
   { file: "install.js", why: "wasHive", from: /\bwasHive = / },
   { file: "install.js", why: "doctor legacy checks", from: /^ {2}\/\/ hivemind, the old name: its leftovers before the install checks/, to: /^ {2}\}\);$/ },
+  { file: "templates/hooks/proteus-lib.js", why: "legacy names block (#6)", from: /^\/\/ legacy-hive:start$/, to: /^\/\/ legacy-hive:end$/ },
   { file: "README.md", why: "Coming from hivemind (#6 rewrites it)", from: /^### Coming from hivemind$/, before: /^#{1,3} / },
 ];
 

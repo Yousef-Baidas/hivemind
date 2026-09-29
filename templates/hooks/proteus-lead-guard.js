@@ -13,7 +13,8 @@
 // Subagents (ev.agent set; they run in the lead's process, so a worktree's own hooks may never load):
 //   no background Bash, no Monitor, no --edit-last. An edit inside a checkout with .claude/proteus-owned
 //   must be an owned path (same rule as proteus-owned-paths.js); an edit in this repo's main checkout
-//   while a proteus/* branch exists is refused (except the scout's teams/*/skills.txt). All else passes.
+//   while a run branch exists (proteus/* or a pre-rename run's, lib.runOpen) is refused (except the
+//   scout's teams/*/skills.txt). All else passes.
 // Linked worktrees and PROTEUS=0 sessions pass untouched.
 // Exit 2 = block; the message on stderr reaches the model as the tool's error.
 "use strict";

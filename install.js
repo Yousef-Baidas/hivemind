@@ -32,7 +32,9 @@
 //
 // Proteus was called hivemind. Any install takes over from it: the old skill links, generated
 // agents and hivemind.json go (edited agents stay and are named), --project removes the
-// repo's hive-*.js hooks and their registrations before installing its own.
+// repo's hive-*.js hooks and their registrations before installing its own, and moves hivemind's
+// state dir under .git into .git/proteus (never over a file already there; --doctor names what
+// stays). A run opened under hivemind keeps its branch, labels and worktree folder until it closes.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -525,7 +527,39 @@ function sandboxRoots(root) {
   const w = cx().sandboxRoots(root);
   if (w.error) warn(`warning: ${w.error}`);
   else log(`sandbox  -> ${path.relative(root, w.file)} (${w.changed ? `${w.created ? "created, " : ""}worker worktrees in ${w.dir} writable` : "worktree folder already writable"})`);
+  if (w.stale) log(`sandbox  -> ${w.stale} dropped from writable_roots (no worktree of a pre-rename run is left in it)`);
+  if (w.legacy) log(`sandbox  -> ${w.legacy.dir} kept in writable_roots: a pre-rename run still has worktrees there (${w.legacy.worktrees.join(", ")}); the next --project drops it once they are gone`);
   return w;
+}
+
+// hook-side helpers (state dir, run branches, legacy names), loaded only where used
+const hl = () => require(path.join(HERE, "templates", "hooks", "proteus-lib.js"));
+
+const commonDir = (root) => { const x = git(["rev-parse", "--git-common-dir"], root); return x.ok && x.out ? path.resolve(root, x.out) : null; };
+// the legacy state dir of the repo at root when it exists, else null
+const legacyState = (root) => { const c = commonDir(root), d = c && hl().legacyStateDir(c); return d && isDir(d) ? d : null; };
+
+// state a pre-rename install left in the legacy state dir moves into <git-common-dir>/proteus,
+// never over a file already there (the *.jsonl logs merge); what stays is named here and by --doctor
+function migrateState(root) {
+  const common = commonDir(root);
+  if (!common) return;
+  const lib = hl();
+  const from = path.relative(root, lib.legacyStateDir(common)), to = path.relative(root, lib.stateDir(common));
+  let r;
+  try { r = lib.migrateState(common); } catch (e) { warn(`warning: ${from} not moved: ${e.message}; install.js --doctor names what is left`); return; }
+  if (r.moved.length) log(`state    -> ${from} moved into ${to} (${r.moved.join(", ")})`);
+  if (r.merged.length) log(`state    -> ${from}: ${r.merged.join(", ")} appended into ${to} (older lines first, each line once)`);
+  for (const line of stateLeft(r, from, to)) warn(line);
+}
+
+// what a state migration left in the legacy dir, and why, one line each
+function stateLeft(r, from, to) {
+  return [
+    r.kept.length && `kept     ${from}: ${r.kept.join(", ")} (also in ${to}, whose copy is the one in use; delete the old copy once you have compared them)`,
+    r.held.length && `kept     ${from}: ${r.held.join(", ")} (a registered git worktree, left where git has it; the rest moves once \`git worktree remove\` drops it)`,
+    r.failed.length && `failed   ${from}: ${r.failed.join(", ")} (not movable now; the next --project retries)`,
+  ].filter(Boolean);
 }
 
 // takeover: Proteus was called hivemind. An install removes only what hivemind's installs
@@ -692,18 +726,24 @@ function migrateRepo(root, opt = {}, base = []) {
     const m = migrateProject(root, true);
     for (const p of m.found) log(`removed  ${p} (hivemind's)`);
     for (const p of m.kept) log(`kept     ${p}`);
+    // the moved state is read by new hooks only: every CLI with Proteus hooks here gets them refreshed
+    const moved = legacyState(root);
+    migrateState(root);
+    const set = moved ? HARNESSES.filter((h) => isProteusProject(root, h)) : [];
     let ok = true;
-    for (const h of new Set([...base, ...m.harnesses])) ok = withHarness(h, () => projectInstall(root, { ...opt, confine: opt.confine && h === "claude" })) && ok;
+    for (const h of new Set([...base, ...m.harnesses, ...set])) ok = withHarness(h, () => projectInstall(root, { ...opt, confine: opt.confine && h === "claude" })) && ok;
     return ok;
   });
 }
 
-// repos under SCAN (3 levels down) whose lead hooks are still hivemind's
+// repos under SCAN (3 levels down) whose lead hooks are still hivemind's, or whose Proteus
+// install still keeps its state in hivemind's state dir
 let SCAN = path.join(HOME, "Projects");
 function scanOld(dir = SCAN) {
   const out = [];
   const walk = (d, depth) => {
     if (HARNESSES.some((h) => isFile(path.join(d, `.${h}`, "hooks", "hive-autostart.js")))) out.push(d);
+    else if (isDir(hl().legacyStateDir(path.join(d, ".git"))) && HARNESSES.some((h) => isProteusProject(d, h))) out.push(d);
     if (depth >= 3) return;
     let ents = [];
     try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
@@ -966,6 +1006,16 @@ async function doctor(fix) {
       if (m.found.length) return ["FIX", `hivemind's pieces in this repo: ${m.found.join(", ")}`, `${self} --project`];
       return m.kept.length ? ["WARN", `hivemind's, left alone in this repo: ${m.kept.join("; ")}`, "move, edit or delete them yourself"] : ["ok", "no hivemind pieces in this repo"];
     }, () => migrateRepo(root, {}, [HARNESS]));
+    // state a pre-rename install left behind: moved by --project and the session start, never silently kept
+    check(() => {
+      const d = legacyState(root);
+      if (!d) return ["ok", "no pre-rename state dir"];
+      const common = commonDir(root), to = path.relative(root, hl().stateDir(common)), from = path.relative(root, d);
+      const plan = hl().migrateState(common, true);
+      const todo = [...plan.moved, ...plan.merged.map((x) => `${x} to merge`)];
+      if (todo.length || !(plan.kept.length + plan.held.length + plan.failed.length)) return ["FIX", `${from} still holds pre-rename state (${todo.join(", ") || "empty"})`, `${self} --project`];
+      return ["WARN", `${from} left beside ${to}: ${stateLeft(plan, from, to).map((l) => l.replace(/^\w+\s+[^:]+: /, "")).join("; ")}`, "the reason beside each says what to do"];
+    }, () => migrateState(root));
     if (!isProject) {
       check(() => ["WARN", "not a Proteus project (no teams/)", `${self} --project`]);
     } else {
@@ -987,8 +1037,9 @@ async function doctor(fix) {
         check(() => {
           const w = cx().sandboxRoots(root, false);
           if (w.error) return ["FIX", w.error.replace(/; add .*/, ""), `add ${w.dir} to writable_roots under [sandbox_workspace_write] in .codex/config.toml`];
-          return w.missing ? ["FIX", `workers cannot write in ${w.dir}: .codex/config.toml does not list it in writable_roots`, `${self} --project`]
-            : ["ok", "worktree folder writable in the Codex sandbox"];
+          if (w.missing) return ["FIX", `workers cannot write in ${w.dir}: .codex/config.toml does not list it in writable_roots`, `${self} --project`];
+          if (w.stale) return ["FIX", `${w.stale} still in writable_roots, but no pre-rename worktree is left in it`, `${self} --project`];
+          return ["ok", `worktree folder writable in the Codex sandbox${w.legacy ? `; ${w.legacy.dir} kept while a pre-rename run has worktrees there (${w.legacy.worktrees.join(", ")})` : ""}`];
         }, () => { if (sandboxRoots(root).created) excludeLocal(root, [".codex/config.toml"], "config.toml"); });
         check(() => codexTrusted(root) ? ["ok", "project trusted in codex"]
           : ["WARN", "project not trusted in codex: its .codex/ hooks do not load", "open codex here, trust the project, approve the hooks in /hooks"]);
