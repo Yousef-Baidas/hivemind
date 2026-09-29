@@ -738,6 +738,181 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   ok("adapter: HIVE_HARNESS path characters stripped, worker hook still enforces", r.code === 2, r.out + r.err);
 }
 
+// ---- Codex adapter: hooks installed in <repo>/.codex/hooks pick it up without HIVE_HARNESS
+{
+  const CX = path.join(W, "cx"); fs.mkdirSync(CX);
+  g(CX, "init", "-q", "-b", "main");
+  fs.mkdirSync(path.join(CX, ".agents", "skills", "hivemind"), { recursive: true });
+  fs.writeFileSync(path.join(CX, ".agents", "skills", "hivemind", "SKILL.md"), "---\nname: hivemind\n---\nCODEX SKILL BODY\n");
+  fs.writeFileSync(path.join(CX, "AGENTS.md"), "## Learned\n");
+  g(CX, "add", "-A"); g(CX, "commit", "-qm", "init");
+  const CXH = path.join(W, "cxhome"); fs.mkdirSync(path.join(CXH, ".claude"), { recursive: true }); fs.mkdirSync(path.join(CXH, ".codex"));
+  fs.writeFileSync(path.join(CXH, ".claude", "hivemind.json"), JSON.stringify({ autoUpdate: false, lastFetch: Date.now() }));
+  const cenvx = { HOME: CXH, CODEX_HOME: path.join(CXH, ".codex") };
+  r = run(path.join(SRC, "install-lead-hooks.js"), "", { cwd: CX, env: { ...cenvx, HIVE_HARNESS: "codex" } });
+  const hj = JSON.parse(fs.readFileSync(path.join(CX, ".codex", "hooks.json"), "utf8"));
+  const guardCmd = (hj.hooks.PreToolUse || []).find((e) => /hive-lead-guard/.test(JSON.stringify(e)));
+  ok("codex install: .codex/hooks.json with absolute hook paths, exact-name guard matcher, rules file", r.code === 0 && /HIVEMIND=0 codex skips them/.test(r.out) &&
+    guardCmd && guardCmd.matcher === "^(apply_patch|Bash|view_image|[a-z_]*spawn_agent)$" && guardCmd.hooks[0].command === `node "${path.join(CX, ".codex", "hooks", "hive-lead-guard.js")}"` &&
+    hj.hooks.SessionStart[0].hooks[0].timeout === 60 && !hj.hooks.PostToolUseFailure && !hj.hooks.TeammateIdle &&
+    /prefix_rule\(pattern=\["gh"\]/.test(fs.readFileSync(path.join(CX, ".codex", "rules", "hivemind.rules"), "utf8")) && fs.existsSync(path.join(CX, ".codex", "hooks", "hive-harness-codex.js")), r.out + r.err);
+  r = run(path.join(SRC, "install-lead-hooks.js"), "", { cwd: CX, env: { ...cenvx, HIVE_HARNESS: "codex" } });
+  ok("codex install: idempotent", /hooks already registered, 0 files updated/.test(r.out), r.out + r.err);
+
+  const CG = path.join(CX, ".codex", "hooks", "hive-lead-guard.js");
+  const TCX = tr("cx-rollout.jsonl", [
+    JSON.stringify({ timestamp: "t", type: "turn_context", payload: { model: "gpt-6-sol", cwd: CX } }),
+    JSON.stringify({ timestamp: "t", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "check shot_0042.png please" }] } }),
+    JSON.stringify({ timestamp: "t", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "<environment_context>other.png</environment_context>" }] } }),
+    JSON.stringify({ timestamp: "t", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "on it" }] } }),
+    JSON.stringify({ timestamp: "t", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: 185000 }, total_token_usage: { total_tokens: 900000 }, model_context_window: 272000 } } }),
+  ]);
+  const cpre = (tool, ti, extra = {}) => ({ hook_event_name: "PreToolUse", session_id: "c1", transcript_path: TCX, cwd: CX, model: "gpt-6-sol", permission_mode: "default", turn_id: "t1", tool_name: tool, tool_input: ti, tool_use_id: "u1", ...extra });
+  const patch = (...files) => ({ command: ["*** Begin Patch", ...files.map((x) => `*** Update File: ${x}\n@@\n-a\n+b`), "*** End Patch"].join("\n") });
+  const cg = (inp, env = {}) => run(CG, inp, { cwd: CX, env: { ...cenvx, ...env } });
+  r = cg(cpre("apply_patch", patch("AGENTS.md", "src/a.ts")));
+  ok("codex guard: a patch touching a deliverable is denied, even beside a lead doc", r.code === 2 && /the lead does not edit src\/a\.ts/.test(r.err) && /HIVEMIND=0 codex/.test(r.err), r.out + r.err);
+  ok("codex guard: a patch of lead docs only is allowed", cg(cpre("apply_patch", patch("AGENTS.md", "docs/adr/0001-x.md"))).code === 0);
+  ok("codex guard: apply_patch run through the shell is an edit", cg(cpre("Bash", { command: "apply_patch <<'EOF'\n" + patch("src/b.ts").command + "\nEOF" })).code === 2);
+  ok("codex guard: plain shell allowed, --edit-last denied", cg(cpre("Bash", { command: "git status" })).code === 0 && cg(cpre("Bash", { command: "gh issue comment 3 --edit-last -b x" })).code === 2);
+  r = cg(cpre("spawn_agent", { message: "x", agent_type: "hive-worker", model: "gpt-6-luna" }));
+  ok("codex guard: single-model mode, a spawn on another model is denied", r.code === 2 && /not on the ladder \(gpt-6-sol\)/.test(r.err), r.err);
+  ok("codex guard: single-model mode, the lead's model is allowed", cg(cpre("spawn_agent", { message: "x", model: "gpt-6-sol" }, { transcript_path: null })).code === 0);
+  ok("codex guard: a multi-agent v2 spawn (collaborationspawn_agent) is checked too", cg(cpre("collaborationspawn_agent", { task_name: "t", message: "gAAAA", model: "gpt-6-luna" })).code === 2);
+  { const m = new RegExp("^(apply_patch|Bash|view_image|[a-z_]*spawn_agent)$");
+    ok("codex guard matcher: every spawn_agent namespace, not wait_agent", m.test("spawn_agent") && m.test("collaborationspawn_agent") && !m.test("collaborationwait_agent") && !m.test("mcp__x__Bash")); }
+  ok("codex guard: a spawn without a model is denied", /names its model/.test(cg(cpre("spawn_agent", { message: "x" })).err));
+  const HCX = path.join(CXH, ".claude", "hivemind.json");
+  fs.writeFileSync(HCX, JSON.stringify({ autoUpdate: false, lastFetch: Date.now(), models: { ladder: ["gpt-6-luna", "gpt-6-sol"], floor: "gpt-6-luna", solo: [] } }));
+  ok("codex guard: with models.ladder set, the lower rung is allowed", cg(cpre("spawn_agent", { message: "x", model: "gpt-6-luna" }, { transcript_path: null })).code === 0);
+  fs.writeFileSync(HCX, JSON.stringify({ autoUpdate: false, lastFetch: Date.now() }));
+  r = cg(cpre("spawn_agent", { message: "x", model: "gpt-6-sol" }));
+  ok("codex guard: spawns refused at the handoff line from the rollout's token_count", r.code === 2 && /context at 185k/.test(r.err), r.err);
+  ok("codex guard: view_image of a file the human named is allowed", cg(cpre("view_image", { path: "renders/shot_0042.png" })).out === "");
+  r = cg(cpre("view_image", { path: "renders/other.png" }));
+  ok("codex guard: view_image of an unnamed image is denied (injected context does not count)", /permissionDecision":"deny"/.test(r.out), r.out + r.err);
+  ok("codex guard: HIVE_HARNESS=claude overrides the install location", cg(cpre("apply_patch", patch("src/a.ts")), { HIVE_HARNESS: "claude" }).code === 0);
+
+  // worker worktree and owned paths, the owned list under .codex
+  const CWT = path.join(W, "cx-wt");
+  g(CX, "worktree", "add", "-q", "-b", "hive/cx-1", CWT);
+  r = run(path.join(CX, ".codex", "hooks", "hive-worktree.js"), "", { cwd: CX, args: [CWT, "src/lighting/"], env: cenvx });
+  ok("codex worktree: hooks and the owned list under .codex, nothing untracked", r.code === 0 && fs.readFileSync(path.join(CWT, ".codex", "hive-owned"), "utf8").includes("src/lighting/") &&
+    fs.existsSync(path.join(CWT, ".codex", "hooks", "hive-harness-codex.js")) && !fs.existsSync(path.join(CWT, ".claude")) && g(CWT, "status", "--porcelain") === "", r.out + r.err + g(CWT, "status", "--porcelain"));
+  const COP = path.join(CWT, ".codex", "hooks", "hive-owned-paths.js");
+  const wp = (...files) => ({ ...cpre("apply_patch", patch(...files)), cwd: CWT });
+  ok("codex owned: a patch inside the owned paths is allowed", run(COP, wp("src/lighting/a.ts"), { cwd: CWT, env: cenvx }).code === 0);
+  r = run(COP, wp("src/lighting/a.ts", "src/other.ts"), { cwd: CWT, env: cenvx });
+  ok("codex owned: one unowned file in a patch denies it", r.code === 2 && /src\/other\.ts/.test(r.err), r.err);
+  r = run(CG, { ...wp("src/other.ts"), agent_id: "t-9", agent_type: "hive-worker" }, { cwd: CX, env: cenvx });
+  ok("codex guard: a subagent's patch outside its owned paths is denied by the lead's hook", r.code === 2 && /src\/other\.ts/.test(r.err), r.err);
+
+  // autostart: plain stdout is the context; agents land in CODEX_HOME as TOML
+  r = run(path.join(CX, ".codex", "hooks", "hive-autostart.js"), { hook_event_name: "SessionStart", session_id: "c1", cwd: CX, model: "gpt-6-sol", source: "startup", transcript_path: null }, { cwd: CX, env: cenvx });
+  ok("codex autostart: skill body from .agents/skills as plain stdout, models= from the event", r.code === 0 && r.out.trim().endsWith("CODEX SKILL BODY") && !r.out.startsWith("{") &&
+    /models=lead:gpt-6-sol,top:gpt-6-sol,mid:gpt-6-sol/.test(r.out), r.out.slice(0, 800) + r.err);
+  r = run(path.join(CX, ".codex", "hooks", "hive-journal.js"), { hook_event_name: "UserPromptSubmit", session_id: "c1", cwd: CX, model: "gpt-6-sol", transcript_path: TCX, prompt: "go" }, { cwd: CX, env: cenvx });
+  ok("codex journal: context as UserPromptSubmit additionalContext", /"hookEventName":"UserPromptSubmit"/.test(r.out) && /185k/.test(r.out), r.out + r.err);
+  r = run(path.join(CX, ".codex", "hooks", "hive-stall.js"), { hook_event_name: "SubagentStop", session_id: "c1", cwd: CX, model: "gpt-6-sol", agent_id: "t-2", agent_type: "hive-worker", stop_hook_active: false, last_assistant_message: "Waiting for the background build to finish.", transcript_path: TCX }, { cwd: CX, env: cenvx });
+  ok("codex stall: a subagent stopping to wait keeps going, as JSON", /"decision":"block"/.test(r.out) && r.code === 0, r.out + r.err);
+
+  const cx = require(path.join(SRC, "hive-harness-codex.js"));
+  const ag = cx.agentFile("hive-worker.md", fs.readFileSync(path.join(ROOT, "agents", "hive-worker.md"), "utf8"));
+  ok("codex agentFile: TOML role with instructions and no model (the spawn picks it)", ag.name === "hive-worker.toml" && /^name = "hive-worker"$/m.test(ag.text) &&
+    /^description = "hivemind generic worker/m.test(ag.text) && /^developer_instructions = ".+"$/m.test(ag.text) && !/^model/m.test(ag.text) && cx.agentFile("x.md", "no frontmatter") === null, ag.text.slice(0, 300));
+  const cev = { raw: { transcript_path: tr("cx-comp.jsonl", [JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "old ask" }] } }), JSON.stringify({ type: "compacted", payload: { message: "sum" } })]) }, model: "" };
+  ok("codex readers: no human prompt across a compaction; model from turn_context", cx.lastHumanPrompt(cev) === null && cx.sessionModel({ raw: { transcript_path: TCX }, model: "" }) === "gpt-6-sol");
+  const kinds = { type: "response_item", payload: { type: "message", role: "user", internal_chat_message_metadata_passthrough: { content_item_kinds: ["hooks.additional_context"] }, content: [{ type: "input_text", text: "looks human" }] } };
+  ok("codex readers: user-role items tagged as injected are skipped", cx.lastHumanPrompt({ raw: { transcript_path: tr("cx-k.jsonl", [JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "typed" } }), JSON.stringify(kinds)]) } }) === "typed");
+  const e = cx.event({ hook_event_name: "PreToolUse", cwd: "/r", tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Add File: a/new.ts\n+x\n*** Update File: b.ts\n*** Move to: c.ts\n*** Delete File: /abs/d.ts\n*** End Patch" } });
+  ok("codex event: every patch path, resolved against cwd; the patch is not a shell command", JSON.stringify(e.paths) === JSON.stringify(["/r/a/new.ts", "/r/b.ts", "/r/c.ts", "/abs/d.ts"]) && e.tool === "edit" && e.command === "" && e.path === "/r/a/new.ts", JSON.stringify(e.paths));
+}
+
+// ---- installer, --harness codex: temp HOME and CODEX_HOME; the claude CLI is never called
+{
+  const XH = chome("codex"), XC = path.join(XH, ".codex");
+  const xenv = (extra = {}) => cenv(XH, { CODEX_HOME: XC, ...extra });
+  const shipped = fs.readdirSync(path.join(ROOT, "agents")).filter((f) => f.endsWith(".md"));
+  const link = (s) => path.join(XH, ".agents", "skills", s);
+  const calls = clog().length;
+  r = run(INST, "", { args: ["--harness", "codex"], cwd: CWD, env: xenv() });
+  ok("codex install: skills linked into ~/.agents/skills, agents as TOML in CODEX_HOME, only hivemind.json under ~/.claude, no claude CLI",
+    r.code === 0 && ["hivemind", "hivemind-review"].every((s) => fs.lstatSync(link(s)).isSymbolicLink() && fs.realpathSync(link(s)) === fs.realpathSync(path.join(ROOT, "skills", s))) &&
+    fs.readdirSync(path.join(XC, "agents")).filter((f) => f.endsWith(".toml")).length === shipped.length &&
+    fs.readdirSync(path.join(XH, ".claude")).join() === "hivemind.json" && clog().length === calls, r.out + r.err);
+  ok("codex install: harness recorded, context-mode MCP command suggested, no Claude-only steps",
+    JSON.stringify(cjson(XH, "hivemind.json").harnesses) === '["codex"]' && r.out.includes("codex mcp add context-mode --env CONTEXT_MODE_PLATFORM=codex -- npx -y context-mode") &&
+    !/AGENT_TEAMS|attribution|trust it/.test(r.out), r.out);
+  const AW = path.join(XC, "agents", "hive-worker.toml"), AG = path.join(XC, "agents", "hive-guide.toml"), AS2 = path.join(XC, "agents", "hive-scout.toml"), AO = path.join(XC, "agents", "other.toml");
+  const old = new Date(Date.now() - 60e3); fs.utimesSync(AW, old, old);
+  fs.writeFileSync(AG, 'name = "hive-guide"\ndeveloper_instructions = "mine"\n');
+  fs.writeFileSync(AS2, '# generated by hivemind from hive-scout.md; edits are overwritten\nname = "stale"\n');
+  fs.writeFileSync(AO, 'name = "other"\n');
+  fs.writeFileSync(path.join(XC, "config.toml"), '[mcp_servers.context-mode]\ncommand = "npx"\n');
+  r = run(INST, "", { args: ["--harness=codex"], cwd: CWD, env: xenv() });
+  ok("codex re-install: unchanged agent not rewritten, stale generated one refreshed, one without the header kept and reported",
+    r.code === 0 && fs.statSync(AW).mtimeMs < Date.now() - 30e3 && /^name = "hive-scout"$/m.test(fs.readFileSync(AS2, "utf8")) && fs.readFileSync(AG, "utf8").includes("mine") &&
+    fs.existsSync(AO) && r.out.includes(`local override kept: ${AG}`) && !/context-mode|Once, in Codex/.test(r.out), r.out + r.err);
+  const BH = chome("both");
+  run(INST, "", { cwd: CWD, env: cenv(BH) });
+  const noKey = !("harnesses" in cjson(BH, "hivemind.json"));
+  run(INST, "", { args: ["--harness", "codex"], cwd: CWD, env: cenv(BH, { CODEX_HOME: path.join(BH, ".codex") }) });
+  ok("codex install: a claude-only install writes no harnesses key; adding codex records both", noKey && JSON.stringify(cjson(BH, "hivemind.json").harnesses) === '["claude","codex"]', JSON.stringify(cjson(BH, "hivemind.json")));
+  ok("codex flags: unknown or missing harness and --confine with codex exit 2; HIVE_HARNESS=codex selects it",
+    run(INST, "", { args: ["--harness", "cursor"], cwd: CWD, env: xenv() }).code === 2 && run(INST, "", { args: ["--harness"], cwd: CWD, env: xenv() }).code === 2 &&
+    run(INST, "", { args: ["--harness", "codex", "--project", "--confine"], cwd: CWD, env: xenv() }).code === 2 &&
+    /^ok   ~\/\.agents\/skills link/m.test(run(INST, "", { args: ["--doctor"], cwd: CWD, env: xenv({ HIVE_HARNESS: "codex" }) }).out));
+
+  // --project: a repo copy of the skill is a duplicate; the lead's files are machine-local
+  const XP = path.join(W, "cx-proj");
+  g(W, "init", "-q", "-b", "main", XP);
+  fs.mkdirSync(path.join(XP, ".agents", "skills", "hivemind"), { recursive: true });
+  fs.writeFileSync(path.join(XP, ".agents", "skills", "hivemind", "SKILL.md"), "---\nname: hivemind\n---\nold copy\n");
+  fs.writeFileSync(path.join(XP, "README.md"), "x\n"); g(XP, "add", "README.md"); g(XP, "commit", "-qm", "init");
+  r = run(INST, "", { args: ["--project", "--harness", "codex"], cwd: XP, env: xenv() });
+  const xhj = JSON.parse(fs.readFileSync(path.join(XP, ".codex", "hooks.json"), "utf8"));
+  const excl = fs.readFileSync(path.join(XP, ".git", "info", "exclude"), "utf8").split("\n");
+  ok("codex --project: hooks in .codex/hooks.json, rules, repo skill copy removed, machine-local files excluded, only teams/ untracked",
+    r.code === 0 && /hive-lead-guard\.js/.test(JSON.stringify(xhj.hooks.PreToolUse)) && fs.existsSync(path.join(XP, ".codex", "rules", "hivemind.rules")) &&
+    !fs.existsSync(path.join(XP, ".agents", "skills", "hivemind")) && /removed  \.agents\/skills\/hivemind /.test(r.out) && !fs.existsSync(path.join(XP, ".claude", "settings.local.json")) &&
+    [".codex/hooks.json", ".codex/hooks/hive-*.js", ".codex/rules/hivemind.rules", ".codex/hive-owned"].every((l) => excl.includes(l)) && g(XP, "status", "--porcelain") === "?? teams/",
+    r.out + r.err + g(XP, "status", "--porcelain"));
+  ok("codex --project: prints the one-time trust and /hooks steps (context-mode already on)",
+    /Once, in Codex:\n  1\. open codex in this repo and trust it.*\n  2\. approve the hivemind hooks in \/hooks/.test(r.out) && !/codex mcp add/.test(r.out), r.out);
+
+  const xdoc = (...a) => run(INST, "", { args: ["--harness", "codex", "--doctor", ...a], cwd: XP, env: xenv() }).out;
+  let d = xdoc();
+  ok("codex doctor: skills, agents, hooks, rules ok; untrusted project and the header-less agent WARN; no Claude-only checks",
+    /^ok   ~\/\.agents\/skills link/m.test(d) && /^ok   codex agents current$/m.test(d) && /^ok   lead hooks registered$/m.test(d) && /^ok   \.codex\/rules\/hivemind\.rules$/m.test(d) &&
+    /^ok   context-mode MCP server$/m.test(d) && /^WARN project not trusted in codex/m.test(d) && /^WARN codex agents not generated by hivemind, left alone: .*hive-guide\.toml/m.test(d) &&
+    !/AGENT_TEAMS|mattpocock|attribution|\.claude\/skills/.test(d), d);
+  fs.writeFileSync(path.join(XC, "config.toml"), `[projects."${XP}"]\ntrust_level = "trusted"\n`);
+  fs.rmSync(path.join(XP, ".codex", "rules"), { recursive: true }); fs.rmSync(path.join(XP, ".codex", "hooks", "hive-lead-guard.js")); fs.unlinkSync(link("hivemind"));
+  d = xdoc();
+  ok("codex doctor: broken pieces FIX, a missing context-mode MCP server WARNs with the codex mcp add command",
+    /^FIX  ~\/\.agents\/skills\/\{hivemind\} not linked/m.test(d) && /^FIX  lead hooks not registered: hive-lead-guard\.js/m.test(d) && /^FIX  \.codex\/rules\/hivemind\.rules missing/m.test(d) &&
+    /^WARN context-mode MCP server \(required\) missing .* — codex mcp add context-mode /m.test(d) && /^ok   project trusted in codex$/m.test(d), d);
+  d = xdoc("--fix");
+  ok("codex doctor --fix: relinks, re-registers, rewrites the rules; the header-less agent stays",
+    /^ok   ~\/\.agents\/skills link .*\(fixed\)$/m.test(d) && /^ok   lead hooks registered \(fixed\)$/m.test(d) && /^ok   \.codex\/rules\/hivemind\.rules( \(fixed\))?$/m.test(d) && fs.existsSync(path.join(XP, ".codex", "rules", "hivemind.rules")) &&
+    fs.readFileSync(AG, "utf8").includes("mine"), d.replace(/\n/g, " / "));
+
+  // --update reinstalls every recorded harness, with --project for each whose hooks the repo has
+  const XB = path.join(W, "xupd.git"), XA = path.join(W, "xupd-a"), XU = path.join(W, "xupd-c");
+  g(W, "init", "-q", "--bare", "-b", "main", XB); g(W, "clone", "-q", XB, XA);
+  for (const f of execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8" }).split("\n").filter((f) => f && fs.existsSync(path.join(ROOT, f)))) {
+    fs.mkdirSync(path.dirname(path.join(XA, f)), { recursive: true }); fs.copyFileSync(path.join(ROOT, f), path.join(XA, f));
+  }
+  g(XA, "add", "-A"); g(XA, "commit", "-qm", "chore: snapshot"); g(XA, "push", "-q", "-u", "origin", "HEAD:main");
+  g(W, "clone", "-q", XB, XU);
+  const UX = chome("xupd");
+  fs.writeFileSync(path.join(UX, ".claude", "hivemind.json"), JSON.stringify({ home: XU, autoUpdate: false, harnesses: ["claude", "codex"] }));
+  r = run(path.join(XU, "install.js"), "", { args: ["--update"], cwd: XP, env: cenv(UX, { CODEX_HOME: path.join(UX, ".codex") }) });
+  ok("--update: both recorded harnesses reinstalled, --project only for codex (the repo's hooks are Codex's)",
+    r.code === 0 && r.out.includes(path.join(UX, ".claude", "skills", "{hivemind,hivemind-review}")) && r.out.includes(path.join(UX, ".agents", "skills", "{hivemind,hivemind-review}")) &&
+    /lead     -> \.codex\/hooks\.json/.test(r.out) && !/settings\.local\.json/.test(r.out) && !fs.existsSync(path.join(XP, ".claude")), r.out + r.err);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;
 const med = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];

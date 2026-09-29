@@ -10,10 +10,11 @@
 #   ... -Update                    git pull this checkout, reinstall, refresh the current repo
 #   ... -AutoUpdate                let sessions pull this checkout (-NoAutoUpdate: stop)
 #   ... -Doctor [-Fix]             check the setup; -Fix applies the safe local fixes
+#   ... -Harness codex             any of the above for Codex CLI instead of Claude Code
 #
 # Or skip PowerShell entirely: node C:\path\to\hivemind\install.js --project
 param([switch]$Project, [switch]$Install, [switch]$Confine, [switch]$Update,
-      [switch]$Doctor, [switch]$Fix, [switch]$AutoUpdate, [switch]$NoAutoUpdate)
+      [switch]$Doctor, [switch]$Fix, [switch]$AutoUpdate, [switch]$NoAutoUpdate, [string]$Harness)
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Write-Host "node not found; install Node 22.5+, open a new terminal, and re-run:"
@@ -29,5 +30,6 @@ if ($Doctor)       { $flags += "--doctor" }
 if ($Fix)          { $flags += "--fix" }
 if ($AutoUpdate)   { $flags += "--auto-update" }
 if ($NoAutoUpdate) { $flags += "--no-auto-update" }
+if ($Harness)      { $flags += "--harness", $Harness }
 & node (Join-Path $PSScriptRoot "install.js") @flags
 exit $LASTEXITCODE

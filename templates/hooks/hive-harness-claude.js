@@ -8,6 +8,8 @@ const os = require("os");
 const { tailLines } = require(path.join(__dirname, "hive-lib.js"));
 
 const name = "claude";
+// the default model ladder, lowest first; solo models run once per project
+const models = { ladder: ["haiku", "sonnet", "opus", "fable"], floor: "sonnet", solo: ["fable"] };
 const bypass = "HIVEMIND=0 claude";
 
 const KINDS = {
@@ -42,6 +44,7 @@ function event(raw) {
     toolName: r.tool_name || "",
     toolUseId: r.tool_use_id || "",
     path: ti.file_path || ti.notebook_path || "",
+    paths: ti.file_path || ti.notebook_path ? [ti.file_path || ti.notebook_path] : [],
     command: typeof ti.command === "string" ? ti.command : "",
     background: ti.run_in_background === true,
     spawnModel: typeof ti.model === "string" ? ti.model : "",
@@ -167,6 +170,8 @@ const home = path.join(os.homedir(), ".claude");
 const skillDirs = (root) => [path.join(root, ".claude", "skills", "hivemind"), path.join(home, "skills", "hivemind")];
 const agentsDir = path.join(home, "agents");
 const hooksDir = (root) => path.join(root, ".claude", "hooks");
+// a shipped agent as this CLI keeps it: {name, text}, or null to skip it
+const agentFile = (file, text) => ({ name: path.basename(file), text });
 const leadSettings = (root) => path.join(root, ".claude", "settings.local.json");
 
 // the required context-mode plugin: installed and enabled at user scope (two small file reads)
@@ -247,7 +252,7 @@ function prepareWorker(wt, src) {
 const ownedFile = (wt) => path.join(wt, ".claude", "hive-owned");
 
 module.exports = {
-  name, bypass, projectRoot, event, deny, context, keepGoing,
+  name, bypass, models, projectRoot, event, deny, context, keepGoing,
   contextTokens, lastAssistantText, lastHumanPrompt, sessionModel,
-  home, skillDirs, agentsDir, hooksDir, contextModeOn, registerLead, prepareWorker, ownedFile, LEAD_HOOKS,
+  home, skillDirs, agentsDir, hooksDir, agentFile, contextModeOn, registerLead, prepareWorker, ownedFile, LEAD_HOOKS,
 };

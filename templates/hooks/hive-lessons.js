@@ -24,8 +24,7 @@ lib.run((ev, ad) => {
   if (ev.kind === "prompt") [kind, text] = ["prompt", ev.prompt];
   else if (ev.kind === "pre-tool" && ev.tool === "shell") [kind, text] = ["command", ev.command];
   else if (ev.kind === "pre-tool" && (ev.tool === "edit" || ev.tool === "read")) {
-    const t = ev.path;
-    [kind, text] = ["path", t && (lib.relPath(root, t) || String(t).split(path.sep).join("/"))];
+    [kind, text] = ["path", ev.paths.map((t) => lib.relPath(root, t) || String(t).split(path.sep).join("/")).join("\n")];
   } else if (ev.kind === "post-tool" && ev.tool === "shell") [kind, text] = ["output", capped(ev.output)];
   else return;
   if (typeof text !== "string" || !text) return;
@@ -43,7 +42,7 @@ lib.run((ev, ad) => {
   for (const l of load(dir, names, hive)) {
     if (!l.on.includes(kind) || (l.scope !== "all" && l.scope !== scope)) continue;
     let re;
-    try { re = new RegExp(l.trigger, "i"); } catch { continue; } // a bad regex skips its lesson only
+    try { re = new RegExp(l.trigger, kind === "path" ? "im" : "i"); } catch { continue; } // a bad regex skips its lesson only; one path per line
     if (re.test(text)) hits.push(l);
   }
 

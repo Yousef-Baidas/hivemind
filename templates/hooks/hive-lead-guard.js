@@ -60,14 +60,14 @@ lib.run((ev, ad) => {
     return; // lib.run exits 0 once stdout drains
   }
   if (ev.tool !== "edit") return;
-  const rel = lib.relPath(root, target);
-  if (!rel) return; // outside the repo: temp issue bodies, memory
-  if (LEAD_MAY_WRITE.some((re) => re.test(rel))) return;
+  const rel = ev.paths.map((p) => lib.relPath(root, p)).find((r) => r && !LEAD_MAY_WRITE.some((re) => re.test(r)));
+  if (!rel) return; // outside the repo (temp issue bodies, memory) or a doc the lead keeps
   ad.deny(`the lead does not edit ${rel}. Decide the fix, then dispatch it to a hive-<profile>-worker (model per the ladder).` + BYPASS);
 });
 
 // the ladder: every spawn names its model, never above the lead's rung, never a solo model, never under the floor
 function modelDenial(c, name) {
+  if (!c.ladder.length) return ""; // no ladder and no known lead model
   const use = `use "${c.top}" for hard tickets and every verdict, "${c.mid}" for standard tickets and helpers`;
   if (!name) return `every Agent call names its model (the agent's default may sit above the lead's): ${use}.`;
   const r = lib.rungOf(c.ladder, name);
@@ -88,8 +88,14 @@ function humanNamed(ev, ad, target) {
 
 // a subagent's edit: owned paths in any checkout that lists them; the main checkout is off limits during a run
 function subagentEdit(ev) {
-  const target = ev.path;
-  if (!target) return "";
+  for (const target of ev.paths) {
+    const why = subagentPath(ev, target);
+    if (why) return why;
+  }
+  return "";
+}
+
+function subagentPath(ev, target) {
   const cwd = path.resolve(ev.cwd || lib.projectRoot(ev));
   const abs = path.resolve(cwd, String(target));
   const wt = lib.gitRoot(path.dirname(abs));

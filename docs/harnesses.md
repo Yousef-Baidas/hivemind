@@ -51,6 +51,23 @@ Aider (no hooks, subagents, MCP or AGENTS.md; slow releases), Crush (no real sub
 - **Gemini CLI** has good hooks, but a subagent's model is fixed in its file, subagents get no lifecycle hooks and no worktrees, and it runs Google models only. Workers would be separate `gemini -p` processes per worktree. Qwen Code covers the same users better.
 - **Claude Code itself:** nothing selects the compaction model (no setting, env var or hook output), and PreCompact can only block. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` overrides the model the guard approved.
 
+## Codex adapter (in progress)
+
+`templates/hooks/hive-harness-codex.js`, written from the 0.159 source, covered by fixture tests, and smoke-tested live on codex-cli 0.159.0 (2026-09-29, ChatGPT login, `codex exec` in a throwaway repo). Hooks installed in `<repo>/.codex/hooks` select it by their location.
+
+- Hooks: `.codex/hooks.json` with absolute paths (hooks get no project-dir variable and run from the turn's cwd through the login shell). Codex runs a new or changed hook only after the human trusts it in `/hooks`, and only in a trusted project. The trust hash covers the hook entry, not the script, so updating a script does not ask again.
+- Edits are `apply_patch` patches that can touch several files; the event carries every path, and one unowned path denies the patch. `apply_patch` run through the shell counts as an edit.
+- Subagents run under the lead's hooks with `agent_id` set, so the lead guard enforces owned paths as it does on Claude Code. Codex makes no worktrees; `hive-worktree.js` already does, and the owned list lives in `.codex/hive-owned`, which the sandbox keeps read-only for the worker.
+- Agents become TOML roles in `$CODEX_HOME/agents` without a `model` key: a role's model overrides the one named on `spawn_agent`, which would defeat the ladder. Roles cannot limit tools, so verifiers are read-only by instruction only.
+- `.codex/rules/hivemind.rules` lets the git writes, `gh`, and the lead's own scripts run outside the sandbox, since workspace-write keeps a worktree's gitdir read-only and turns the network off. `reset`, `clean` and other rewrites still ask.
+- No default ladder: a Codex lead runs single-model (every spawn on the lead's model) until `models.ladder` in `hivemind.json` or a `models:` line names the rungs.
+- Not enforceable on Codex: background shell calls (the hook sees no yield time), the failed-tool and teammate-idle hooks, the status line.
+- Verified live: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop and SubagentStop fire under `codex exec`, and the tool hooks fire inside a subagent with its own `agent_id` and model (lead `gpt-6-astra`, subagent `gpt-6-luna` from `spawn_agent`'s `model`). The guard denied the lead's `apply_patch` and a spawn off the ladder, the autostart context reached the model, the TOML roles loaded as spawnable agent types, and the transcript readers read a real rollout. `git commit` in workspace-write succeeded with the rules file and did not without it.
+- Found live: multi-agent v2 names its tools with a namespace prefix and no separator (`collaborationspawn_agent`, `collaborationwait_agent`), serialises no `Agent` alias for them, and sends the spawn `message` encrypted. The adapter treats any name ending in `spawn_agent` as a spawn and the guard's matcher is a regex for the same; only the `model` argument is read. `view_image` takes `path`; patches name absolute paths.
+- Not yet run live: the TUI (hook trust in `/hooks`), a worker in a linked worktree, and `apply_patch` through the shell.
+- Installer: `install.js --harness codex` links the skills into `~/.agents/skills`, writes the TOML roles, installs the lead hooks and rules, excludes them from git, and prints the one-time steps (trust the project, approve the hooks in `/hooks`, add context-mode). `--doctor --harness codex` checks the same.
+- Still to do: skill prose that names Codex's tools; team skills (Codex reads `.agents/skills`, not `teams/<p>/.claude/skills`); the commit-msg gate in `lefthook.yml` and `hive-gates.yml`, which names `.claude/hooks/commit-msg.js`; the doctor seeing context-mode installed as a Codex plugin; and leaving the Claude-only hook files out of `.codex/hooks`.
+
 ## Local models, honestly
 
 The only benchmarks found are from late 2025. Qwen3-32B scores 40% on the Aider polyglot and 48.7 overall on BFCL function calling (47.9 multi-turn), and smaller models are lower. That is well under hosted models. Local models fit as `mid` workers under a hosted lead, which OpenCode's per-agent `model` allows, sooner than as a lead. An all-local run should be sold as possible, not as equal.

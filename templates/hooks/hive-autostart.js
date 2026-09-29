@@ -144,7 +144,12 @@ function sync(ad, home, root, notes) {
   let n = 0;
   let hooks = 0;
   const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
-  for (const f of ls(path.join(home, "agents"))) if (f.endsWith(".md") && lib.syncFile(path.join(home, "agents", f), path.join(ad.agentsDir, f))) n++;
+  for (const f of ls(path.join(home, "agents"))) {
+    if (!f.endsWith(".md")) continue;
+    let a = null;
+    try { a = ad.agentFile(f, fs.readFileSync(path.join(home, "agents", f), "utf8")); } catch {}
+    if (a && lib.syncText(a.text, path.join(ad.agentsDir, a.name))) n++;
+  }
   const hooksSrc = path.join(home, "templates", "hooks");
   for (const f of ls(hooksSrc)) {
     if (f === "install-lead-hooks.js") continue; // the installer runs from the source, like install-lead-hooks does
@@ -211,6 +216,7 @@ function humanSaid(root) {
 function models(ev, root) {
   safe(() => lib.saveLead(ev, root));
   const c = lib.modelCaps(ev, root);
+  if (!c.ladder.length) return "models=unknown";
   const lead = c.leadRung >= 0 ? c.ladder[c.leadRung] : "unknown";
   return `models=lead:${lead},top:${c.top},mid:${c.mid}`;
 }

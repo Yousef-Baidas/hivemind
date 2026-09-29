@@ -169,6 +169,11 @@ function workerDenial(ev) {
 function syncFile(src, dst) {
   let a;
   try { a = fs.readFileSync(src); } catch { return false; }
+  return syncText(a, dst);
+}
+// write dst only when its bytes differ; true when written
+function syncText(a, dst) {
+  a = Buffer.isBuffer(a) ? a : Buffer.from(String(a));
   try { if (a.equals(fs.readFileSync(dst))) return false; } catch {}
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   fs.writeFileSync(dst, a);
@@ -187,7 +192,9 @@ function readInbox(common) {
 // defaults; a project's `models:` line in AGENTS.md (the human's call, e.g. `models: solo=none
 // floor=haiku`) overrides floor and solo. A solo model never runs as a subagent: at most one per
 // project, and that one is the lead when the session runs on it.
-const MODEL_DEFAULTS = { ladder: ["haiku", "sonnet", "opus", "fable"], floor: "sonnet", solo: ["fable"] };
+// the harness's default ladder; none (a CLI whose lineup hivemind does not know) is single-model
+// mode, the lead's own model as the only rung, until models.ladder names one
+const modelDefaults = () => harness().models || { ladder: [], floor: "", solo: [] };
 
 // ladder index of a model name or id ("claude-opus-5-5[1m]" → opus); the longest matching rung wins
 function rungOf(ladder, name) {
@@ -214,8 +221,9 @@ function savedLead(ev, root) {
 function modelPolicy(root) {
   const cfg = (hivemindConfig().models || {});
   const list = (v) => (Array.isArray(v) ? v : String(v || "").split(",")).map((x) => String(x).trim().toLowerCase()).filter((x) => x && x !== "none");
-  const ladder = Array.isArray(cfg.ladder) && cfg.ladder.length ? list(cfg.ladder) : MODEL_DEFAULTS.ladder;
-  const pol = { ladder, floor: String(cfg.floor || MODEL_DEFAULTS.floor).toLowerCase(), solo: "solo" in cfg ? list(cfg.solo) : MODEL_DEFAULTS.solo };
+  const d = modelDefaults();
+  const ladder = Array.isArray(cfg.ladder) && cfg.ladder.length ? list(cfg.ladder) : d.ladder;
+  const pol = { ladder, floor: String(cfg.floor || d.floor).toLowerCase(), solo: "solo" in cfg ? list(cfg.solo) : d.solo };
   let agents = "";
   try { agents = fs.readFileSync(path.join(root, "AGENTS.md"), "utf8"); } catch {}
   const line = /^models:(.*)$/m.exec(agents);
@@ -231,8 +239,10 @@ function modelPolicy(root) {
 // what this session may spawn: top (hard tickets, every verdict) and mid (standard tickets, helpers)
 function modelCaps(ev, root) {
   const pol = modelPolicy(root);
-  const { ladder, solo } = pol;
   const lead = leadModel(ev) || savedLead(ev, root);
+  const ladder = pol.ladder.length ? pol.ladder : lead ? [String(lead).toLowerCase()] : [];
+  const { solo } = pol;
+  if (!ladder.length) return { ladder, solo, lead, leadRung: -1, cap: -1, floor: -1, top: "", mid: "", floorName: "" }; // nothing known to enforce
   const L = rungOf(ladder, lead);
   // highest rung at or under the lead that is not solo (the lead is that one instance); unknown lead: the whole ladder
   let cap = L < 0 ? ladder.length - 1 : L;
@@ -258,6 +268,6 @@ module.exports = {
   readInbox, refreshInbox, inboxFile,
   run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, hiveDir, readJSON, writeJSON,
   configFile, hivemindConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
-  workerDenial, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, WAIT_MSG, EDIT_LAST_MSG,
+  workerDenial, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, syncText, WAIT_MSG, EDIT_LAST_MSG,
 };
 try { harness(); } catch {}

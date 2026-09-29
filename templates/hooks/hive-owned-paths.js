@@ -13,7 +13,7 @@ const root = path.resolve(lib.projectRoot());
 if (!fs.existsSync(lib.ownedFile(root))) process.exit(0);
 
 lib.run((ev, ad) => {
-  if (ev.tool !== "edit" || !ev.path) return;
-  const why = lib.ownedDenial(root, ev.path);
+  if (ev.tool !== "edit") return;
+  const why = ev.paths.map((p) => lib.ownedDenial(root, p)).find(Boolean);
   if (why) ad.deny(why);
 });
