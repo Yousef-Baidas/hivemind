@@ -53,6 +53,9 @@ ok("teams/ROUTING.md exists in the checkout", fs.existsSync(path.join(CLONE, "te
 ok(".claude/hooks/proteus-autostart.js exists in the checkout", fs.existsSync(path.join(CLONE, ".claude", "hooks", "proteus-autostart.js")));
 ok("teams/templates is ignored by git", git(["check-ignore", "-q", "teams/templates"]).status === 0);
 ok("no nested roster copy at teams/templates/teams", !fs.existsSync(path.join(CLONE, "teams", "templates", "teams")));
+// self-host runs the checkout's own templates/teams/link-skills.*: a copy in teams/ would be a second, drifting source (#17)
+const linkCopies = ["link-skills.js", "link-skills.sh", "link-skills.ps1"].filter((f) => fs.existsSync(path.join(CLONE, "teams", f)));
+ok("no teams/link-skills.{js,sh,ps1} copy in the checkout", !linkCopies.length, linkCopies.join(", "));
 
 // the move itself (#4 amendment): git tracks the shipped roster under templates/teams and nothing under teams/
 const shipped = (git(["ls-files", "templates/teams"]).stdout || "").split("\n").filter(Boolean);
