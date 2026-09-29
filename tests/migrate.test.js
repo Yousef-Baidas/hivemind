@@ -4,7 +4,10 @@
 // fake HOME installed from main at 7d3d544 then fast-forwarded by its own autostart. One case per contract item: the
 // Check, the auto-update path, and Addendum 2 items 1-4; then the PR #16 review items: the journal split an auto-update
 // leaves (merged, legacy lines first), the Codex -proteus root at session start, a `#` inside a writable root, an
-// unreadable .git/hive entry under --project, and a worktree registered in legacy scratch. PROTEUS_MIGRATE_SRC
+// unreadable .git/hive entry under --project, and a worktree registered in legacy scratch; then the #18 pins, with
+// faults from a `node -r` preload written into the fixture dir: EXDEV from linkSync, a rerun after a partial merge, an
+// append mid-merge, recall of an unmerged legacy journal, the Codex -hive root rules, hive-owned, legacy inbox labels,
+// and the hook refresh for every CLI after a state move. PROTEUS_MIGRATE_SRC
 // overrides the checkout under test (tests only). Never the network, the real ~/.claude, ~/.codex or ~/.pi, or a
 // write to the checkout.
 // Exit 0 if every assertion passed, 1 otherwise.
@@ -481,6 +484,147 @@ if (process.platform === "win32" || (typeof process.getuid === "function" && pro
   let inside = "";
   try { inside = at ? g(at, "rev-parse", "--is-inside-work-tree") : ""; } catch {}
   ok("scratch worktree (5): after the sweep the live worktree is still registered, not prunable, and usable", !!at && inside === "true" && !/^prunable\b/m.test(list()), list().replace(/\n/g, " | "));
+}
+
+// ---- migration pins (#18): paths the QA mutation pass found unpinned. Faults come from a `node -r <preload>` written
+// into T, never from a hook in shipped code.
+const preload = (name, body) => { const f = path.join(T, `${name}.preload.js`); fs.writeFileSync(f, `"use strict";\nconst fs = require("fs");\n${body}\n`); return f; };
+const runPre = (pre, script, cwd, home, args = [], input = "", extra = {}) => {
+  const r = spawnSync(process.execPath, ["-r", pre, script, ...args], { cwd, input: typeof input === "string" ? input : JSON.stringify(input), env: { ...lib.ENV, CLAUDE_PROJECT_DIR: cwd, ...envFor(home, extra) }, encoding: "utf8", windowsHide: true, timeout: 120000 });
+  return { code: r.status, out: r.stdout || "", err: r.stderr || "" };
+};
+const INSTALL = path.join(SRC, "install.js");
+const tmpLeft = (repo) => { try { return fs.readdirSync(path.join(repo, ".git", "proteus")).filter((f) => f.endsWith(".merge.tmp")); } catch { return []; } };
+
+// a filesystem with no hard links: linkSync throws EXDEV and every file still moves, by copy
+{
+  const LK = legacyRepo("exdev");
+  const HK = fakeHome("exdev");
+  const pre = preload("exdev", "fs.linkSync = () => { throw Object.assign(new Error(\"EXDEV: cross-device link not permitted\"), { code: \"EXDEV\" }); };");
+  const r = runPre(pre, INSTALL, LK, HK, ["--project"]);
+  ok("pin exdev: with linkSync throwing EXDEV, --project exits 0 and reports no failed entry", r.code === 0 && !/EXDEV/.test(r.out + r.err), `${r.code} ${(r.out + r.err).split("\n").filter((l) => /state|failed|EXDEV/.test(l)).join(" | ")}`);
+  ok("pin exdev: the journal and the inbox cache are copied into .git/proteus byte for byte and .git/hive is gone",
+    read(LK, ".git", "proteus", "journal.jsonl") === JOURNAL && /"questions"/.test(read(LK, ".git", "proteus", "inbox.json") || "") && !exists(LK, ".git", "hive"),
+    `${read(LK, ".git", "proteus", "journal.jsonl")} :: ${exists(LK, ".git", "hive") ? fs.readdirSync(path.join(LK, ".git", "hive")).join(",") : "hive gone"}`);
+}
+
+// a merge that renamed its result into place but could not delete the legacy journal: the rerun keeps each line once
+{
+  const JR = splitRepo("journal-rerun");
+  const HR = fakeHome("journal-rerun");
+  const pre = preload("unlink-busy", "const path = require(\"path\"), unlink = fs.unlinkSync;\nfs.unlinkSync = function (p, ...a) { if (String(p).endsWith(path.join(\"hive\", \"journal.jsonl\"))) throw Object.assign(new Error(\"EBUSY\"), { code: \"EBUSY\" }); return unlink.call(this, p, ...a); };");
+  const r1 = runPre(pre, INSTALL, JR, HR, ["--project"]);
+  ok("pin partial merge fixture: the first pass merges, then fails to delete .git/hive/journal.jsonl (EBUSY)",
+    /journal\.jsonl \(EBUSY\)/.test(r1.out + r1.err) && JSON.stringify(lines(read(JR, ".git", "proteus", "journal.jsonl"))) === JSON.stringify(MERGED) && read(JR, ".git", "hive", "journal.jsonl") === JOURNAL,
+    `${(r1.out + r1.err).split("\n").filter((l) => /hive/.test(l)).join(" | ")} :: ${prompts(lines(read(JR, ".git", "proteus", "journal.jsonl")))}`);
+  const r2 = run(INSTALL, JR, HR, ["--project"]);
+  mergedJournal(JR, "rerun after a partial merge");
+  ok("pin partial merge: the rerun exits 0", r2.code === 0, r2.out + r2.err);
+}
+
+// a line appended to .git/proteus/journal.jsonl while the merge runs aborts that pass: failed (EAGAIN), no line lost
+const APPENDED = JSON.stringify({ ts: "2026-09-29T09:20:00.000Z", session_id: "s2", prompt: "appended while the merge ran" });
+const appendPre = () => preload("append-mid-merge", `const write = fs.writeFileSync;\nlet done = false;\nfs.writeFileSync = function (f, ...a) {\n  const r = write.call(this, f, ...a);\n  if (!done && /\\.merge\\.tmp$/.test(String(f))) { done = true; fs.appendFileSync(String(f).replace(/\\.\\d+\\.\\d+\\.merge\\.tmp$/, ""), ${JSON.stringify(APPENDED + "\n")}); }\n  return r;\n};`);
+{
+  const JM = splitRepo("journal-append");
+  const HM = fakeHome("journal-append");
+  const r1 = runPre(appendPre(), INSTALL, JM, HM, ["--project"]);
+  ok("pin append mid-merge: --project reports .git/hive journal.jsonl as failed (EAGAIN)", /journal\.jsonl \(EAGAIN\)/.test(r1.out + r1.err), (r1.out + r1.err).split("\n").filter((l) => /hive|state/.test(l)).join(" | "));
+  ok("pin append mid-merge: no line is lost: the legacy journal is untouched, the current one holds its lines plus the appended one, no temp file is left",
+    read(JM, ".git", "hive", "journal.jsonl") === JOURNAL && read(JM, ".git", "proteus", "journal.jsonl") === NEWER + APPENDED + "\n" && !tmpLeft(JM).length,
+    `${prompts(lines(read(JM, ".git", "hive", "journal.jsonl")))} || ${prompts(lines(read(JM, ".git", "proteus", "journal.jsonl")))} || ${tmpLeft(JM).join(",")}`);
+  const r2 = run(INSTALL, JM, HM, ["--project"]);
+  const got = lines(read(JM, ".git", "proteus", "journal.jsonl"));
+  ok("pin append mid-merge: a rerun merges every line once, the appended one included, and removes .git/hive/journal.jsonl",
+    r2.code === 0 && JSON.stringify(got) === JSON.stringify([...MERGED, APPENDED]) && !exists(JM, ".git", "hive", "journal.jsonl"), `${r2.code} ${prompts(got)}`);
+}
+
+// the compaction recall still reads a legacy journal whose merge was aborted at this session start
+{
+  const JH = splitRepo("journal-held");
+  const HH2 = fakeHome("journal-held");
+  newHooks(JH);
+  quiet(HH2);
+  const s = runPre(appendPre(), path.join(JH, ".claude", "hooks", "proteus-autostart.js"), JH, HH2, [], { hook_event_name: "SessionStart", source: "compact", session_id: "s-held", cwd: JH });
+  ok("pin held journal fixture: the session start's merge was aborted, the legacy journal is still in .git/hive", read(JH, ".git", "hive", "journal.jsonl") === JOURNAL, `${s.out.split("\n").filter((l) => /still holds/.test(l)).join(" | ")} ${s.err.slice(0, 200)}`);
+  const said = s.out.slice(Math.max(0, s.out.indexOf("human said")));
+  ok("pin held journal: after a compaction the recall surfaces the unmerged legacy journal's prompt and the current one's",
+    /human said/.test(s.out) && said.includes(PROMPT) && said.includes(NEW_PROMPT), said.slice(0, 600) || s.err.slice(0, 300));
+}
+
+// Codex writable_roots: only a worktree inside ../<repo>-hive keeps that root listed
+{
+  const HC2 = fakeHome("codex-pins");
+  const cx = { CODEX_HOME: path.join(HC2, ".codex") };
+  const toml = (repo, roots) => { fs.mkdirSync(path.join(repo, ".codex"), { recursive: true }); fs.writeFileSync(path.join(repo, ".codex", "config.toml"), `[sandbox_workspace_write]\nwritable_roots = [${roots.map((x) => JSON.stringify(x)).join(", ")}]\n`); };
+  const rootsOf = (repo) => tomlRoots(read(repo, ".codex", "config.toml") || "");
+
+  const LO = legacyRepo("codex-unrelated", { open: false });
+  const other = path.join(T, "codex-unrelated-elsewhere");
+  g(LO, "worktree", "add", "-q", "--detach", other);
+  toml(LO, [`${LO}-hive`]);
+  let r = run(INSTALL, LO, HC2, ["--project", "--harness", "codex"], "", cx);
+  let roots = rootsOf(LO);
+  ok("pin codex: a registered worktree outside ../<repo>-hive does not keep that root; --project drops it and lists ../<repo>-proteus",
+    r.code === 0 && fs.existsSync(path.join(other, ".git")) && Array.isArray(roots) && !roots.includes(`${LO}-hive`) && roots.includes(`${LO}-proteus`), `${r.code} ${JSON.stringify(roots)}`);
+
+  const LS = legacyRepo("codex-both", { open: false });
+  toml(LS, [`${LS}-hive`, `${LS}-proteus`]);
+  r = run(INSTALL, LS, HC2, ["--project", "--harness", "codex"], "", cx);
+  roots = rootsOf(LS);
+  ok("pin codex: with ../<repo>-proteus already listed and no legacy worktree, --project still drops the stale ../<repo>-hive root",
+    r.code === 0 && Array.isArray(roots) && !roots.includes(`${LS}-hive`) && roots.includes(`${LS}-proteus`), `${r.code} ${JSON.stringify(roots)}`);
+}
+
+// a worker worktree dispatched before the rename carries .claude/hive-owned: the owned-path hook enforces it
+{
+  const LP = legacyRepo("legacy-owned");
+  const WT = path.join(`${LP}-hive`, `${RUN}-3`);
+  g(LP, "worktree", "add", "-q", WT, `hive/${RUN}-3`);
+  fs.cpSync(path.join(SRC, "templates", "hooks"), path.join(WT, ".claude", "hooks"), { recursive: true });
+  fs.writeFileSync(path.join(WT, ".claude", "hive-owned"), "src/api/\n");
+  const HO = fakeHome("legacy-owned");
+  const edit = (f) => run(path.join(WT, ".claude", "hooks", "proteus-owned-paths.js"), WT, HO, [], { hook_event_name: "PreToolUse", session_id: "w-legacy", cwd: WT, tool_name: "Edit", tool_input: { file_path: path.join(WT, f) } });
+  const out = edit(path.join("src", "store", "db.ts"));
+  ok("pin legacy owned: an edit outside the paths in .claude/hive-owned is denied", out.code === 2 && /NEEDS src\/store\/db\.ts/.test(out.err) && /hive-owned/.test(out.err), `${out.code} ${out.err}`);
+  const inside = edit(path.join("src", "api", "a.ts"));
+  ok("pin legacy owned: an edit inside them is allowed", inside.code === 0, `${inside.code} ${inside.err}`);
+}
+
+// the inbox counts a legacy run's needs-human questions and reviews
+{
+  const LI = legacyRepo("legacy-inbox");
+  const HI = fakeHome("legacy-inbox");
+  newHooks(LI);
+  const saved = read(DB);
+  const db = JSON.parse(saved);
+  db.issues.push({ number: 21, title: "which store for the demo cache?", state: "OPEN", createdAt: iso(3), closedAt: null, milestone: null, labels: [{ name: "needs-human" }, { name: "hive-question" }], comments: [] });
+  db.issues.push({ number: 22, title: "review: demo m1", state: "OPEN", createdAt: iso(3), closedAt: null, milestone: null, labels: [{ name: "needs-human" }, { name: "hive-review" }], comments: [] });
+  fs.writeFileSync(DB, JSON.stringify(db));
+  let r;
+  try { r = run(path.join(LI, ".claude", "hooks", "proteus-inbox.js"), LI, HI, ["--refresh"]); } finally { fs.writeFileSync(DB, saved); }
+  const inbox = JSON.parse(read(LI, ".git", "proteus", "inbox.json") || "{}");
+  const ns = (k) => (Array.isArray(inbox[k]) ? inbox[k].map((i) => i.n) : []);
+  ok("pin legacy inbox: a hive-question issue is listed under questions in inbox.json, a hive-review one under reviews",
+    ns("questions").includes(21) && ns("reviews").includes(22) && /question #21\b/.test(r.out), `${JSON.stringify(inbox)} :: ${r.out}`);
+}
+
+// after a state move, --project refreshes the hooks of every CLI set up in the repo, not only the one named
+{
+  const LB = legacyRepo("refresh-both", { open: false });
+  const HB2 = fakeHome("refresh-both");
+  const cx = { CODEX_HOME: path.join(HB2, ".codex") };
+  const r0 = run(INSTALL, LB, HB2, ["--project"], "", cx);
+  const r1 = run(INSTALL, LB, HB2, ["--project", "--harness", "codex"], "", cx);
+  const lib0 = path.join(LB, ".codex", "hooks", "proteus-lib.js");
+  ok("pin refresh fixture: the repo is set up for Claude and Codex", r0.code === 0 && r1.code === 0 && exists(LB, ".claude", "hooks", "proteus-autostart.js") && exists(LB, ".codex", "hooks", "proteus-autostart.js") && fs.existsSync(lib0), `${r0.code} ${r1.code} ${r1.err.slice(0, 300)}`);
+  // a pre-rename state dir again, and a Codex hook from before the move
+  fs.mkdirSync(path.join(LB, ".git", "hive"), { recursive: true });
+  fs.writeFileSync(path.join(LB, ".git", "hive", "lessons.md"), "legacy lesson\n");
+  fs.writeFileSync(lib0, "// proteus-lib.js from before the state move\n");
+  const r = run(INSTALL, LB, HB2, ["--project"], "", cx);
+  ok("pin refresh: --project (Claude) after a state move also refreshes .codex/hooks to this checkout's hooks",
+    r.code === 0 && !exists(LB, ".git", "hive") && read(lib0) === read(SRC, "templates", "hooks", "proteus-lib.js"), `${r.code} ${(read(lib0) || "").slice(0, 80)}`);
 }
 
 summary();
