@@ -1,89 +1,23 @@
 #!/usr/bin/env bash
-# Install the hivemind skill for Claude Code on Linux / macOS.
+# Install, update or check the hivemind skill for Claude Code (Linux / macOS / Git Bash).
+# All logic lives in install.js; this only finds node. Flags pass through unchanged.
 #
-#   ./install.sh                 skill + agents into ~/.claude (every repo)
-#   ./install.sh --project       same into ./.claude of the current repo, plus
-#                                ./teams/<profile>/ with skills linked per skills.txt,
-#                                and the lead's autostart + guard hooks in
-#                                ./.claude/settings.local.json (HIVEMIND=0 claude skips them)
-#   ./install.sh --project --install   also `npx skills add` any skill not on this machine
-#   ./install.sh --project --confine   also remove the global ~/.claude/skills/<name>
-#                                      symlink for every linked skill, so the lead never sees it
+#   ./install.sh                     link the skills into ~/.claude/skills (every repo), copy agents
+#   ./install.sh --project           also set up the current repo: teams/ with linked skills and
+#                                    the lead's autostart + guard hooks (HIVEMIND=0 claude skips them)
+#   ./install.sh --project --install --confine   fetch missing skills, hide them from the lead
+#   ./install.sh --update            git pull this checkout, reinstall, refresh the current repo
+#   ./install.sh --auto-update       let sessions pull this checkout (--no-auto-update: stop)
+#   ./install.sh --laya <url|off|setup>  point lesson recall at a local laya classifier, decline it,
+#                                    or print its GPU setup steps (runs nothing)
+#   ./install.sh --doctor [--fix]    check the setup; --fix applies the safe local fixes
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT=0; LINKFLAGS=()
-for a in "$@"; do
-  case "$a" in
-    --project) PROJECT=1 ;;
-    --install|--confine) LINKFLAGS+=("$a") ;;
-    *) echo "unknown flag: $a" >&2; exit 2 ;;
-  esac
-done
-if (( ${#LINKFLAGS[@]} && !PROJECT )); then echo "${LINKFLAGS[*]} needs --project" >&2; exit 2; fi
-
-if (( PROJECT )); then BASE="$PWD/.claude"; else BASE="$HOME/.claude"; fi
-
-# skill + agents
-mkdir -p "$BASE/skills" "$BASE/agents"
-for s in hivemind hivemind-review; do
-  rm -rf "$BASE/skills/$s"
-  cp -R "$HERE/skills/$s" "$BASE/skills/$s"; rm -rf "$BASE/skills/$s/.impeccable"
-done
-# overwrite only what ships; local hive-*.md agents (per-repo profiles) survive
-cp "$HERE"/agents/hive-*.md "$BASE/agents/"
-echo "skills   -> $BASE/skills/{hivemind,hivemind-review}"
-echo "agents   -> $BASE/agents/hive-*.md"
-
-# attribution off
-SETTINGS="$HOME/.claude/settings.json"
-mkdir -p "$(dirname "$SETTINGS")"
-[[ -f "$SETTINGS" ]] || echo '{}' > "$SETTINGS"
-if command -v node >/dev/null 2>&1; then
-  node -e '
-    const fs = require("fs"); const p = process.argv[1];
-    const s = JSON.parse(fs.readFileSync(p, "utf8"));
-    s.attribution = { commit: "", pr: "", sessionUrl: false };
-    fs.writeFileSync(p, JSON.stringify(s, null, 2) + "\n");
-  ' "$SETTINGS"
-  echo "settings -> attribution disabled"
-else
-  echo "node not found; add to $SETTINGS by hand:"
-  echo '  "attribution": { "commit": "", "pr": "", "sessionUrl": false }'
+if ! command -v node >/dev/null 2>&1; then
+  echo "node not found; install Node 22.5+ and re-run:" >&2
+  echo "  macOS: brew install node   Arch: sudo pacman -S nodejs npm   Windows: winget install OpenJS.NodeJS.LTS" >&2
+  echo "  others: https://nodejs.org" >&2
+  exit 1
 fi
-
-# teams (project only)
-if (( PROJECT )); then
-  mkdir -p teams
-  cp -n "$HERE/teams/.gitignore" teams/.gitignore 2>/dev/null || true
-  cp "$HERE/teams/link-skills.sh" "$HERE/teams/link-skills.ps1" teams/
-  mkdir -p teams/templates
-  cp -R "$HERE/templates/." teams/templates/
-  for dir in "$HERE"/teams/*/; do
-    p="$(basename "$dir")"
-    mkdir -p "teams/$p"
-    [[ -f "teams/$p/PROFILE.md" ]] || cp "$dir/PROFILE.md" "teams/$p/PROFILE.md"
-    [[ -f "teams/$p/skills.txt" ]] || cp "$dir/skills.txt" "teams/$p/skills.txt"
-    # required.txt is the pipeline's, not the scout's or the repo's: always refreshed
-    [[ -f "$dir/required.txt" ]] && cp "$dir/required.txt" "teams/$p/required.txt"
-  done
-  echo "teams    -> $PWD/teams (PROFILE.md, skills.txt, link-skills.*, templates/)"
-  bash teams/link-skills.sh "${LINKFLAGS[@]}"
-
-  # lead autostart + guard: machine-local, never tracked, so worker worktrees do not inherit them
-  if command -v node >/dev/null 2>&1; then
-    node teams/templates/hooks/install-lead-hooks.js
-    if [[ -d .git ]] && ! grep -qxF '.claude/settings.local.json' .git/info/exclude 2>/dev/null; then
-      mkdir -p .git/info && echo '.claude/settings.local.json' >> .git/info/exclude
-    fi
-  else
-    echo "node not found; lead autostart + guard not installed"
-  fi
-fi
-
-if [[ "${CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-}" != "1" ]]; then
-  echo
-  echo "Set CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 in your shell rc, then restart the terminal."
-fi
-echo
-echo "Done. /hivemind bootstraps the rest."
+exec node "$HERE/install.js" "$@"

@@ -3,14 +3,15 @@
 // Usage: node commit-msg.js <path-to-COMMIT_EDITMSG>
 "use strict";
 const fs = require("fs");
-const msg = fs.readFileSync(process.argv[2], "utf8");
+// `git commit -v` appends the diff below a scissors line; it is not part of the message
+const msg = fs.readFileSync(process.argv[2], "utf8").split(/^# -+ >8 -+$/m)[0];
 const lines = msg.split(/\r?\n/).filter((l) => !l.startsWith("#"));
 const subject = lines[0] || "";
-const fail = (m) => { console.error("commit rejected: " + m); process.exit(1); };
+const fail = (m) => { fs.writeSync(2, "commit rejected: " + m + "\n"); process.exit(1); };
 
 const types = "feat|fix|refactor|test|docs|chore|perf|build|ci|style|revert";
 const re = new RegExp(`^(${types})(\\([a-z0-9._/-]+\\))?!?: [A-Za-z][^\\n]*$`);
-if (/^(Merge|Revert) /.test(subject)) process.exit(0);
+if (/^(Merge|Revert|fixup!|squash!|amend!) /.test(subject)) process.exit(0);
 if (!re.test(subject)) fail(`subject must be "<type>(<scope>): lowercase imperative" (types: ${types})`);
 if (subject.length > 72) fail("subject over 72 chars");
 if (/\.$/.test(subject)) fail("no trailing period");

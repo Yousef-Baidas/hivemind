@@ -1,82 +1,36 @@
-# Install the hivemind skill for Claude Code on Windows.
+# Install, update or check the hivemind skill for Claude Code on Windows.
+# All logic lives in install.js; this only finds node and maps the switches.
+# Windows blocks unsigned scripts by default, so run it as:
 #
-#   .\install.ps1                  skill + agents into ~\.claude (every repo)
-#   .\install.ps1 -Project         same into .\.claude of the current repo, plus
-#                                  .\teams\<profile>\ with skills linked per skills.txt
-#   .\install.ps1 -Project -Install  also `npx skills add` any skill not on this machine
-#   .\install.ps1 -Project -Confine  also remove the global ~\.claude\skills\<name>
-#                                    link for every linked skill, so the lead never sees it
-param([switch]$Project, [switch]$Install, [switch]$Confine)
+#   powershell -ExecutionPolicy Bypass -File install.ps1                     skills + agents for every repo
+#   powershell -ExecutionPolicy Bypass -File C:\path\to\hivemind\install.ps1 -Project
+#                                  also set up the current repo: teams\ with linked skills and
+#                                  the lead's autostart + guard hooks
+#   ... -Project -Install -Confine fetch missing skills, hide them from the lead
+#   ... -Update                    git pull this checkout, reinstall, refresh the current repo
+#   ... -AutoUpdate                let sessions pull this checkout (-NoAutoUpdate: stop)
+#   ... -Laya <url|off|setup>      point lesson recall at a local laya classifier, decline it,
+#                                  or print its GPU setup steps (runs nothing)
+#   ... -Doctor [-Fix]             check the setup; -Fix applies the safe local fixes
+#
+# Or skip PowerShell entirely: node C:\path\to\hivemind\install.js --project
+param([switch]$Project, [switch]$Install, [switch]$Confine, [switch]$Update,
+      [switch]$Doctor, [switch]$Fix, [switch]$AutoUpdate, [switch]$NoAutoUpdate, [string]$Laya)
 
-$ErrorActionPreference = "Stop"
-if (($Install -or $Confine) -and -not $Project) { throw "-Install/-Confine need -Project" }
-$Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Base = if ($Project) { Join-Path (Get-Location) ".claude" } else { Join-Path $HOME ".claude" }
-
-# skill + agents
-New-Item -ItemType Directory -Force -Path (Join-Path $Base "skills"), (Join-Path $Base "agents") | Out-Null
-foreach ($s in @("hivemind", "hivemind-review")) {
-    $Dest = Join-Path $Base "skills\$s"
-    if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
-    Copy-Item -Recurse (Join-Path $Here "skills\$s") $Dest
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Host "node not found; install Node 22.5+, open a new terminal, and re-run:"
+    Write-Host "  winget install OpenJS.NodeJS.LTS"
+    exit 1
 }
-# overwrite only what ships; local hive-*.md agents (per-repo profiles) survive
-Copy-Item (Join-Path $Here "agents\hive-*.md") (Join-Path $Base "agents")
-Write-Host "skills   -> $Base\skills\{hivemind,hivemind-review}"
-Write-Host "agents   -> $Base\agents\hive-*.md"
-
-# attribution off
-$Settings = Join-Path $HOME ".claude\settings.json"
-New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Settings) | Out-Null
-if (-not (Test-Path $Settings)) { Set-Content -Path $Settings -Value "{}" }
-if (Get-Command node -ErrorAction SilentlyContinue) {
-    $js = @'
-const fs = require("fs"); const p = process.argv[1];
-const s = JSON.parse(fs.readFileSync(p, "utf8"));
-s.attribution = { commit: "", pr: "", sessionUrl: false };
-fs.writeFileSync(p, JSON.stringify(s, null, 2) + "\n");
-'@
-    node -e $js $Settings
-    Write-Host "settings -> attribution disabled"
-} else {
-    Write-Host "node not found; add to $Settings by hand:"
-    Write-Host '  "attribution": { "commit": "", "pr": "", "sessionUrl": false }'
-}
-
-# teams (project only)
-if ($Project) {
-    New-Item -ItemType Directory -Force -Path "teams" | Out-Null
-    if (-not (Test-Path "teams\.gitignore")) { Copy-Item (Join-Path $Here "teams\.gitignore") "teams\.gitignore" }
-    Copy-Item (Join-Path $Here "teams\link-skills.sh"), (Join-Path $Here "teams\link-skills.ps1") "teams\"
-    New-Item -ItemType Directory -Force -Path "teams\templates" | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $Here "templates\*") "teams\templates\"
-    foreach ($dir in Get-ChildItem (Join-Path $Here "teams") -Directory) {
-        $p = $dir.Name
-        New-Item -ItemType Directory -Force -Path "teams\$p" | Out-Null
-        if (-not (Test-Path "teams\$p\PROFILE.md")) { Copy-Item (Join-Path $dir.FullName "PROFILE.md") "teams\$p\PROFILE.md" }
-        if (-not (Test-Path "teams\$p\skills.txt")) { Copy-Item (Join-Path $dir.FullName "skills.txt") "teams\$p\skills.txt" }
-        $req = Join-Path $dir.FullName "required.txt"
-        if (Test-Path $req) { Copy-Item -Force $req "teams\$p\required.txt" }
-    }
-    Write-Host "teams    -> $(Get-Location)\teams (PROFILE.md, skills.txt, link-skills.*, templates\)"
-    & ".\teams\link-skills.ps1" -Install:$Install -Confine:$Confine
-
-    # lead autostart + guard: machine-local, never tracked
-    if (Get-Command node -ErrorAction SilentlyContinue) {
-        node "teams\templates\hooks\install-lead-hooks.js"
-        if ((Test-Path ".git" -PathType Container) -and -not (Select-String -Path ".git\info\exclude" -SimpleMatch ".claude/settings.local.json" -Quiet -ErrorAction SilentlyContinue)) {
-            New-Item -ItemType Directory -Force -Path ".git\info" | Out-Null
-            Add-Content -Path ".git\info\exclude" -Value ".claude/settings.local.json"
-        }
-    } else {
-        Write-Host "node not found; lead autostart + guard not installed"
-    }
-}
-
-if ($env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS -ne "1") {
-    Write-Host ""
-    Write-Host 'Run once, then restart the terminal:'
-    Write-Host '  [Environment]::SetEnvironmentVariable("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1", "User")'
-}
-Write-Host ""
-Write-Host "Done. /hivemind bootstraps the rest."
+$flags = @()
+if ($Project)      { $flags += "--project" }
+if ($Install)      { $flags += "--install" }
+if ($Confine)      { $flags += "--confine" }
+if ($Update)       { $flags += "--update" }
+if ($Doctor)       { $flags += "--doctor" }
+if ($Fix)          { $flags += "--fix" }
+if ($AutoUpdate)   { $flags += "--auto-update" }
+if ($NoAutoUpdate) { $flags += "--no-auto-update" }
+if ($Laya)         { $flags += "--laya"; $flags += $Laya }
+& node (Join-Path $PSScriptRoot "install.js") @flags
+exit $LASTEXITCODE

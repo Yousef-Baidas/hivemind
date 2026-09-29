@@ -2,7 +2,9 @@
 
 Reading this file loads the skills in `teams/backend/.claude/skills/`. Read it once, first.
 
+Real-world role: backend engineer.
 Owns: API, data, auth, background jobs.
+Never touches: frontend UI and styling, CI and deploy config.
 
 Rules:
 - Contract signatures are frozen. Need a change: comment `NEEDS contract <file:line>: <why>` on the issue, stop.

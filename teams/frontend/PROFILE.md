@@ -2,7 +2,9 @@
 
 Reading this file loads the skills in `teams/frontend/.claude/skills/`. Read it once, first.
 
+Real-world role: frontend engineer.
 Owns: UI, styling, client state, accessibility.
+Never touches: API handlers, data layer, CI and deploy config.
 
 Rules:
 - Match the existing design system before inventing one. Read the component the ticket points at, not the whole tree.

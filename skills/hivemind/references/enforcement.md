@@ -1,6 +1,6 @@
 # Enforcement
 
-Rules in prompts drift. These make the important ones mechanical. Templates ship in `teams/templates/` (copied by `install.sh --project`); the scaffold or stabilise ticket installs them once.
+Rules in prompts drift. These make the important ones mechanical. Templates ship in `teams/templates/` (copied by `install.js --project`); the scaffold or stabilise ticket installs them once. §3–6 and §8 apply to every domain; §1 CI applies wherever the checks run headless; §7, §9, §10 are code-only (other domains get their deep pass from the team rubric in `domains.md`).
 
 ## 1. CI on every ticket PR + branch protection
 
@@ -21,16 +21,13 @@ The PUT fails on a private repo on GitHub Free (403) and `gates` never reports w
 
 ## 2. Path ownership hook
 
-Before spawning a worker, in its worktree:
+Before spawning a worker, from the repo root:
 
 ```
-mkdir -p <wt>/.claude/hooks
-cp teams/templates/hooks/hive-owned-paths.js <wt>/.claude/hooks/
-cp teams/templates/hooks/settings.local.json <wt>/.claude/settings.local.json
-printf '%s\n' <owned paths and globs> > <wt>/.claude/hive-owned
+node .claude/hooks/hive-worktree.js <wt> <owned paths and globs…>
 ```
 
-Every `Edit`/`Write` outside the list is refused at the tool level with the `NEEDS` instruction as the error. `Bash` writes (`sed -i`, redirects) are not caught; the verifier's `gh pr diff <pr> --name-only` against the owned paths is the backstop and any file outside them is `BACK-TO-WORKER`. `settings.local.json` and `.claude/hive-owned` are untracked and die with the worktree. No list file → hook allows all, so the lead, verifiers, and bootstrap are unaffected.
+It writes `<wt>/.claude/hive-owned` (one path or glob per line; re-running replaces the list), copies the worker hooks and `worktree-settings.local.json` into the worktree as a backup, and adds those local files to the repo's `info/exclude`; same on Linux, macOS, and Windows. Workers run inside the lead's process, so the rule that bites is the lead's `hive-lead-guard.js`: for a subagent it refuses every `Edit`/`Write` outside the worktree's `hive-owned` list with the `NEEDS` instruction as the error, and any subagent edit to the main checkout while a run is open. `Bash` writes (`sed -i`, redirects) are not caught; the verifier's `gh pr diff <pr> --name-only` against the owned paths is the backstop and any file outside them is `BACK-TO-WORKER`. These files are untracked and die with the worktree. No list file → allowed, so verifiers and bootstrap are unaffected.
 
 ## 3. lefthook + commit-msg check
 
@@ -46,7 +43,7 @@ Step 8 reports cost per merged ticket from `npx ccusage@latest session --json` (
 
 ## 6. Skill pinning
 
-`teams/link-skills.sh` writes `teams/skills-lock.json` (source and sha256 over the skill's files, per linked skill) and warns `drift: <skill>` when a machine's copy differs from the committed hash. Commit the lock; a teammate whose install drifted re-runs `npx skills update <skill>` or accepts the new hash by re-running the link script with `--relock`.
+`teams/link-skills.js` writes `teams/skills-lock.json` (source and sha256 over the skill's files, per linked skill) and warns `drift: <skill>` when a machine's copy differs from the committed hash. Commit the lock; a teammate whose install drifted re-runs `npx skills update <skill>` or accepts the new hash by re-running the link script with `--relock`.
 
 ## 7. Mutation testing per milestone
 
@@ -69,13 +66,23 @@ Required, `teams/devops/required.txt`. The scaffold or stabilise worker reads `t
 
 ## 10. Deep review per milestone, architecture scan at close
 
-Required, `teams/qa/required.txt`. Per-ticket verifiers check a diff against its contract; nobody at that level sees what five merged tickets did to a module. So at every milestone the QA pass (Opus) applies `thermo-nuclear-code-quality-review` to the milestone diff; its blockers are `WAVE-RED` tickets and the human gate stays shut until they merge. Per milestone, not per ticket: on a forty-line diff it demands rewrites the ticket never asked for and doubles the verifier bill. At close the same agent runs the scan phase of mattpocock `improve-codebase-architecture` and files at most five candidates on the `hive-debt` issue. Both are read from their `SKILL.md`; both are `disable-model-invocation`. Non-blocker findings go to `hive-debt`, where the human decides what becomes a run.
+Required, `teams/qa/required.txt`. Per-ticket verifiers check a diff against its contract; nobody at that level sees what five merged tickets did to a module. So at every milestone the QA pass (Opus) applies `thermo-nuclear-code-quality-review` to the milestone diff; its blockers are `WAVE-RED` tickets and the human gate stays shut until they merge. Per milestone, not per ticket: on a forty-line diff it demands rewrites the ticket never asked for and doubles the verifier bill. At close the same agent runs the scan phase of mattpocock `improve-codebase-architecture` and files at most five candidates on the last milestone's debt issue. Both are read from their `SKILL.md`; both are `disable-model-invocation`. Non-blocker findings go to the milestone's debt issue, where the human decides at close what becomes a run.
 
-## 11. The lead's guard and autostart
+## 11. Hooks
 
-`install.sh --project` copies `hive-autostart.js` and `hive-lead-guard.js` to `.claude/hooks/` and registers them in `.claude/settings.local.json` (untracked, so a worker's worktree never inherits them; both also exit silently in a linked worktree or inside a subagent).
+`install.js --project` runs `install-lead-hooks.js`, which copies every hook to `.claude/hooks/` and registers the lead's set in `.claude/settings.local.json` (untracked, so a worker's worktree never inherits it). The autostart re-syncs changed hooks from the hivemind checkout at every session start, so a hook fix reaches every project without reinstalling. All hooks fail open: an internal error never blocks the session.
 
-- Autostart (`SessionStart`): prints the skill body and a `hive-state` line built from local files, so every session in the repo opens as the lead at "Session start" with no command typed. A resumed session gets the state line only.
-- Guard (`PreToolUse`): on the main thread, refuses `Edit`/`Write` inside the repo except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, `docs/adr/*.md`; refuses an `Agent` call whose model is Haiku or the lead's tier, or a non-`hive-*` agent with no model (it would inherit the lead's). `Bash` writes are not caught; rule 1 of the skill covers them.
+Lead (main checkout):
 
-`HIVEMIND=0 claude` opens a plain session with neither: the review session, or the human working by hand.
+- `hive-autostart.js` (`SessionStart`): prints the skill body and a `hive-state` line from local files, so every session opens as the lead at "Session start" with no command typed. Also: `doc-bloat`, `lessons`, `hivemind-src`, `hivemind-update`, `scratch` (over 1 GB), `context-mode=missing` (plugin not installed and enabled) in the state line; the run-log tail at startup with an open run and after a compaction; after a compaction, the last ten human messages verbatim. Once a day it fetches the hivemind checkout in the background; with `autoUpdate` on it fast-forwards it. Each session it starts `hive-scratch.js --sweep --stale` detached.
+- `hive-lead-guard.js` (`PreToolUse`): on the main thread refuses `Edit`/`Write` inside the repo except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, `docs/adr/*.md`, `docs/lessons/*.md`; refuses an `Agent` call whose model is Haiku or the lead's tier, or a non-`hive-*` agent with no model; refuses new `Agent` spawns at `HIVE_HANDOFF_HARD` context; refuses `gh … --edit-last` (one account posts for every agent, so an edit can overwrite a ruling); refuses `Read` of an image (png, jpg, webp, exr, …) unless the human's latest message names the file, because each costs the lead ~1.5k tokens and judging renders is the verifier's or the human's job. Inside subagents it refuses `run_in_background` Bash, `Monitor`, `--edit-last`, and edits outside the worktree's owned paths (§2). `Bash` file writes are not caught; rule 1 of the skill covers them.
+- `hive-journal.js` (`UserPromptSubmit`): appends every human message to `.git/hive/journal.jsonl` (last 500), reminds the lead to log decisions, names open question issues at most every ten minutes, and meters context (`stack.md`).
+- `hive-lessons.js` (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`): trigger-based lesson recall (`lessons.md`).
+- `hive-scratch.js` (`PreToolUse`, `PostToolUse`, `PostToolUseFailure` on `Bash`, subagents included): ledgers each new entry directly in the temp dir that this user owns and the command or its output names; `--path`, `--sweep` and `--size` from the command line (`operations.md`). Only a sweep deletes, and only what the ledger or the scratch dir holds.
+- `hive-stall.js` (`SubagentStop`, `TeammateIdle`): refuses a stop that ends waiting on a background job instead of reporting (`operations.md`).
+- `hive-statusline.js` (status line): appends `hive: N questions · M reviews` to your own status line while any are open; it reads a cache and refreshes it in the background at most once a minute. Registered only when the project has no `statusLine` of its own.
+- Not hooks: `hive-status.js` (the `status` command), `hive-inbox.js` (`--refresh` lists open questions and reviews; the `questions` command), `hive-worktree.js` (§2).
+
+Worker worktree (written by `hive-worktree.js`, a backup for sessions opened inside a worktree): `hive-owned-paths.js` (§2), `hive-worker-guard.js` (no `run_in_background`, no `Monitor`, no `--edit-last`), `hive-lessons.js`, `hive-scratch.js`, `hive-stall.js` on `Stop`.
+
+`HIVEMIND=0 claude` opens a plain session with none of the lead's hooks: the review session, or the human working by hand. Hook state lives in `<git-common-dir>/hive/` (`journal.jsonl`, `inbox.json`, `lesson-hits.json`, `scratch-ledger.jsonl`, `scratch/`, `scratch-size.json`, lesson and stall caches) and is never committed. `node <hivemind checkout>/install.js --doctor` checks the whole install, `--doctor --fix` repairs what it safely can.

@@ -2,7 +2,9 @@
 
 Reading this file loads the skills in `teams/devops/.claude/skills/`. Read it once, first.
 
+Real-world role: platform / release engineer.
 Owns: CI, containers, deploy config, environment.
+Never touches: application logic in frontend or backend paths.
 
 Rules:
 - Reproducible locally before CI. A step you cannot run with one command is not done.

@@ -2,7 +2,11 @@
 
 Reading this file loads the skills in `teams/security/.claude/skills/`. Read it once, first.
 
-Runs alongside the profile verifier on tickets touching auth, input parsing, secrets, file or network I/O.
+Real-world role: application security engineer. Owns nothing; second verifier.
+
+Runs alongside the team verifier on tickets touching auth, input parsing, secrets, file or network I/O, money, personal data, or anything published.
+
+Not code: check personal data exposure, credentials in files, rights and licences of included material, money flows, and claims that create legal exposure; skip semgrep.
 
 First, mechanical: `semgrep --config p/owasp-top-ten --config p/secrets --json --quiet $(gh pr diff <pr> --name-only)`; every finding is a numbered item in the verdict. Missing semgrep → note once, continue. New dependency in the diff → OSV query per `references/enforcement.md` §8.
 

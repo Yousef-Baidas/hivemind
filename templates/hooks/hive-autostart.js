@@ -2,67 +2,191 @@
 // Claude Code SessionStart hook: start every session in a hivemind repo as the lead,
 // as if the human had typed /hivemind. Prints the skill body plus a local state line
 // so the lead knows what bootstrap can skip without spending a tool call.
+// Also: syncs agents and hooks from the hivemind checkout named in ~/.claude/hivemind.json,
+// checks it for updates (background fetch at most daily, fast-forward to it when autoUpdate), and after
+// a compaction (or a startup with an open run) re-injects the run-log tail and, after a
+// compaction, the human's last ten messages from the journal. Starts the scratch safety sweep
+// (hive-scratch.js --sweep --stale) detached, so it never slows the start.
 // Silent (no autostart) when: HIVEMIND=0, inside a subagent, or in a linked worktree
 // (workers and the review session's fresh checkout are not the lead).
 "use strict";
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { execFileSync } = require("child_process");
+const { execFileSync, spawn } = require("child_process");
+const lib = require(path.join(__dirname, "hive-lib.js"));
 
 if (process.env.HIVEMIND === "0") process.exit(0);
-const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-let input = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => (input += c));
-process.stdin.on("end", () => {
-  let ev = {};
-  try { ev = JSON.parse(input); } catch {}
-  if (ev.agent_id) process.exit(0);
-  // linked worktree: .git is a file pointing at the main checkout
-  try { if (fs.statSync(path.join(root, ".git")).isFile()) process.exit(0); } catch {}
+lib.run((ev) => {
+  if (ev.agent_id) return;
+  const root = path.resolve(lib.projectRoot(ev));
+  if (lib.isLinked(root)) return;
 
   const skillDir = [path.join(root, ".claude", "skills", "hivemind"), path.join(os.homedir(), ".claude", "skills", "hivemind")]
     .find((d) => fs.existsSync(path.join(d, "SKILL.md")));
-  if (!skillDir) process.exit(0);
+  if (!skillDir) return;
 
-  const state = localState();
-  // a resumed session still has the skill in its transcript; only the state line is new
-  if (ev.source === "resume") {
-    process.stdout.write(`hivemind: session resumed, you are still the lead. ${state}\n`);
-    process.exit(0);
+  const notes = [];
+  const cfg = lib.hivemindConfig();
+  const home = typeof cfg.home === "string" && fs.existsSync(cfg.home) ? path.resolve(cfg.home) : null;
+  let behind = 0;
+  if (home) {
+    behind = safe(() => update(home, cfg, notes), 0);
+    safe(() => sync(home, root, notes));
   }
+  const runs = hiveBranches(root);
+  const state = localState(root, runs, home, behind) + " " + safe(() => inboxState(root), "inbox=unknown");
+  safe(() => scratchSweep(root));
+  const src = ev.source;
+
+  if (src === "resume" || src === "fork") {
+    // a resumed session still has the skill in its transcript; only the state line is new
+    process.stdout.write([`hivemind: session resumed, you are still the lead. ${state}`, ...notes].join("\n") + "\n");
+    return;
+  }
+  const extra = [];
+  if (src === "compact" || runs.length) extra.push(safe(() => runLogTail(root, runs), ""));
+  if (src === "compact") extra.push(safe(() => humanSaid(root), ""));
+
   const body = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
   process.stdout.write(
     [
       "hivemind autostart: this repo runs on hivemind. The skill below is loaded exactly as if the human had typed /hivemind; do not wait for the command.",
       "The human's first message is the work order (or a question about the run). Void only if that message is /hivemind-review, another slash command, or says \"no hivemind\".",
-      `References live in ${path.join(skillDir, "references")}/.`,
+      `References live in ${path.join(skillDir, "references")}${path.sep}.`,
       state,
-      ev.source === "compact"
+      src === "compact"
         ? "Context was just compacted. The summary above is a hint, not state: re-derive your position from the tracker (Session start 1-3, then the run-log issue) before any dispatch. Background polls and spawned agents may still be alive; check the task list before spawning a duplicate."
         : "",
+      ...notes,
+      ...extra.filter(Boolean),
       "",
       body,
     ].join("\n")
   );
 });
 
-function localState() {
+function safe(fn, dflt) { try { return fn(); } catch { return dflt; } }
+
+// background fetch at most once a day; behind-count from the already-fetched upstream ref
+function update(home, cfg, notes) {
+  const last = typeof cfg.lastFetch === "number" ? cfg.lastFetch : Date.parse(cfg.lastFetch) || 0;
+  if (Date.now() - last > 24 * 3600e3) {
+    try {
+      const c = spawn("git", ["-C", home, "fetch", "--quiet"], { detached: true, stdio: "ignore", windowsHide: true });
+      c.on("error", () => {});
+      c.unref();
+    } catch {}
+    safe(() => lib.writeJSON(lib.configFile(), { ...cfg, lastFetch: Date.now() }));
+  }
+  const behind = parseInt(lib.git(["-C", home, "rev-list", "--count", "HEAD..@{u}"], home), 10) || 0;
+  if (!behind || cfg.autoUpdate !== true) return behind;
+  try {
+    const dirty = execFileSync("git", ["-C", home, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8", timeout: 3000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    if (dirty.trim()) return behind;
+    // fast-forward to the already-fetched upstream: no network wait, no race with the background fetch
+    execFileSync("git", ["-C", home, "merge", "--ff-only", "--quiet", "@{u}"], { timeout: 15000, windowsHide: true, stdio: "ignore" });
+    notes.push(`hivemind: updated to ${lib.git(["-C", home, "rev-parse", "--short", "HEAD"], home)}`);
+    return 0;
+  } catch { return behind; }
+}
+
+// agents → ~/.claude/agents, hooks → <repo>/.claude/hooks, only when bytes differ; never deletes
+function sync(home, root, notes) {
+  let n = 0;
+  let hooks = 0;
+  const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
+  const agentsDir = path.join(os.homedir(), ".claude", "agents");
+  for (const f of ls(path.join(home, "agents"))) if (f.endsWith(".md") && lib.syncFile(path.join(home, "agents", f), path.join(agentsDir, f))) n++;
+  const hooksSrc = path.join(home, "templates", "hooks");
+  for (const f of ls(hooksSrc)) {
+    if (f === "install-lead-hooks.js") continue; // the installer runs from the source, like install-lead-hooks does
+    const s = path.join(hooksSrc, f);
+    if (fs.statSync(s).isFile() && lib.syncFile(s, path.join(root, ".claude", "hooks", f))) hooks++;
+  }
+  // a new hook file may need a new registration
+  if (hooks) lib.registerLeadHooks(path.join(root, ".claude", "settings.local.json"));
+  if (n + hooks) notes.push(`hivemind: synced ${n + hooks} files from ${home}`);
+}
+
+// only when the hive has scratch state; the sweep caches the size the next state line reads
+function scratchSweep(root) {
+  const hive = lib.hiveDir(lib.gitCommonDir(root));
+  if (!fs.existsSync(path.join(hive, "scratch-ledger.jsonl")) && !fs.existsSync(path.join(hive, "scratch"))) return;
+  const c = spawn(process.execPath, [path.join(__dirname, "hive-scratch.js"), "--sweep", "--stale"], { cwd: root, detached: true, stdio: "ignore", windowsHide: true });
+  c.on("error", () => {});
+  c.unref();
+}
+
+function hiveBranches(root) {
+  const runs = lib.git(["-C", root, "branch", "--list", "hive/*", "--format=%(refname:short)"], root).split("\n").filter(Boolean);
+  // hive/<run>-<id> are worker branches; keep only the run branches
+  return runs.filter((b) => !runs.some((a) => a !== b && b.startsWith(a + "-"))).slice(0, 10);
+}
+
+function runLogTail(root, runs) {
+  const list = JSON.parse(lib.gh(["issue", "list", "--label", "hive-log", "--state", "open", "--json", "number,title", "--limit", "5"], root) || "null");
+  if (!Array.isArray(list)) return "";
+  if (!list.length) return "run-log: no open issue labelled hive-log.";
+  const pick = list.find((i) => runs.some((r) => String(i.title).includes(r.replace(/^hive\//, "")))) || list[0];
+  const view = JSON.parse(lib.gh(["issue", "view", String(pick.number), "--json", "comments"], root) || "{}");
+  const bodies = ((view && view.comments) || []).slice(-12).map((c) => String((c && c.body) || "").trim()).filter(Boolean);
+  const kept = [];
+  let total = 0;
+  for (let i = bodies.length - 1; i >= 0; i--) {
+    if (total + bodies[i].length > 3000) { if (!kept.length) kept.unshift(bodies[i].slice(-3000)); break; }
+    kept.unshift(bodies[i]);
+    total += bodies[i].length;
+  }
+  return [`run-log #${pick.number} tail (newest last):`, ...kept.map((b) => "- " + b.replace(/\n/g, "\n  "))].join("\n");
+}
+
+// open needs-human questions/reviews: the cache when under 10 min old, else a 3 s refresh
+function inboxState(root) {
+  const common = lib.gitCommonDir(root);
+  if (!common) return "inbox=unknown";
+  let age = Infinity;
+  try { age = Date.now() - fs.statSync(lib.inboxFile(common)).mtimeMs; } catch {}
+  const inbox = (age > 10 * 60 * 1000 && lib.refreshInbox(root, common, 3000)) || lib.readInbox(common);
+  return inbox ? `inbox=${inbox.questions.length}q/${inbox.reviews.length}r` : "inbox=unknown";
+}
+
+function humanSaid(root) {
+  const common = lib.gitCommonDir(root);
+  if (!common) return "";
+  const lines = lib.tailLines(path.join(lib.hiveDir(common), "journal.jsonl"), 512 * 1024).slice(-10);
+  const said = lines.map((l) => safe(() => JSON.parse(l).prompt, "")).filter((p) => typeof p === "string" && p.trim())
+    .map((p) => "- " + (p.length > 400 ? p.slice(0, 400) + "…" : p).replace(/\n/g, "\n  "));
+  return said.length ? ["human said (verbatim, newest last):", ...said].join("\n") : "";
+}
+
+// the required context-mode plugin: installed and enabled at user scope (two small file reads)
+function contextModeOn() {
+  const id = "context-mode@context-mode";
+  const dir = path.join(os.homedir(), ".claude");
+  const inst = lib.readJSON(path.join(dir, "plugins", "installed_plugins.json"), {}) || {};
+  const s = lib.readJSON(path.join(dir, "settings.json"), {}) || {};
+  return !!(inst.plugins && Array.isArray(inst.plugins[id]) && inst.plugins[id].length && s.enabledPlugins && s.enabledPlugins[id] === true);
+}
+
+function localState(root, runs, home, behind) {
   const has = (f) => fs.existsSync(path.join(root, f));
   const read = (f) => { try { return fs.readFileSync(path.join(root, f), "utf8"); } catch { return ""; } };
+  const ls = (d) => { try { return fs.readdirSync(path.join(root, d)); } catch { return []; } };
   const agents = read("AGENTS.md") + "\n" + read("CLAUDE.md"); // older installs keep ## Learned in CLAUDE.md
   const profiles = (() => { try { return fs.readdirSync(path.join(root, "teams"), { withFileTypes: true }).filter((e) => e.isDirectory() && fs.existsSync(path.join(root, "teams", e.name, "skills.txt"))).map((e) => e.name); } catch { return []; } })();
   const shipped = profiles.filter((p) => /shipped default/.test(read(`teams/${p}/skills.txt`).split("\n")[0]));
-  const unlinked = profiles.filter((p) => { try { return fs.readdirSync(path.join(root, "teams", p, ".claude", "skills")).length === 0; } catch { return true; } });
-  let runs = [];
-  try {
-    runs = execFileSync("git", ["-C", root, "branch", "--list", "hive/*", "--format=%(refname:short)"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
-      .split("\n").filter(Boolean);
-    // hive/<run>-<id> are worker branches; keep only the run branches
-    runs = runs.filter((b) => !runs.some((a) => a !== b && b.startsWith(a + "-"))).slice(0, 10);
-  } catch {}
+  const unlinked = profiles.filter((p) => ls(path.join("teams", p, ".claude", "skills")).length === 0);
+  // root agent docs over budget, and any CLAUDE_*.md / CLAUDE-*.md split at all
+  const bloat = ls(".").filter((f) => /^(CLAUDE|AGENTS).*\.md$/.test(f)).map((f) => {
+    const text = read(f);
+    const lines = text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0;
+    return lines > 150 || /^CLAUDE[_-]/.test(f) ? `${f}:${lines}` : "";
+  }).filter(Boolean);
+  const lessons = ls(path.join("docs", "lessons")).filter((f) => f.endsWith(".md")).length;
+  const common = lib.gitCommonDir(root);
+  const scratch = common ? Math.round(((lib.readJSON(path.join(lib.hiveDir(common), "scratch-size.json"), {}) || {}).bytes || 0) / 1048576) : 0;
   const yn = (b) => (b ? "yes" : "NO");
   return (
     "hive-state (local files only; tracker not queried): " +
@@ -78,6 +202,12 @@ function localState() {
       `lefthook=${yn(has("lefthook.yml"))}`,
       `protection=${/protection:\s*none/.test(agents) ? "none" : "on"}`,
       `hive-branches=${runs.join(",") || "none"}`,
+      `doc-bloat=${bloat.join(",") || "none"}`,
+      `lessons=${lessons}`,
+      ...(scratch > 1024 ? [`scratch=${scratch}MB`] : []),
+      ...(contextModeOn() ? [] : ["context-mode=missing"]),
+      `hivemind-src=${home || "none"}`,
+      ...(behind ? [`hivemind-update=${behind}-behind (node ${path.join(home, "install.js")} --update)`] : []),
     ].join(" ")
   );
 }
