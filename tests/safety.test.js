@@ -9,6 +9,8 @@
 // Case 7 fakes os.userInfo().homedir with a --require preload passed in NODE_OPTIONS, reading FAKE_USER_HOME, so it reaches
 // install.js and every node it spawns. Case 10 requires install.js in a child that fakes win32 and an in-memory disk: install.js,
 // when required rather than run, exports { allowedRoots, safeRemove } and runs nothing.
+// #17 pins the guard layers a mutation pass let go: the doctor's dupe walk stops at the toplevel (case 13), standalone
+// removeLink refuses a link reached through a symlinked HOME/.claude (case 14), and allowedRoots drops a toplevel holding a home (case 15).
 // PROTEUS_SAFETY_SRC overrides the checkout cloned and read, for tests only.
 // Exit 0 if every assertion passed, 1 otherwise; exit 1 before any spawn when os.tmpdir() is inside the user's home.
 "use strict";
@@ -377,6 +379,51 @@ try {
     ok("case 12 (symlinked teams/zz/.claude, standalone): nothing outside the repo is removed, changed or added", !moved12.length, `${moved12.join(", ")} | ${r12.status} ${r12.stderr}`);
     ok("case 12 (symlinked teams/zz/.claude, standalone): outside/skills/foo keeps its target", linkOf(path.join(out12, "skills", "foo")) === path.join(T12, "precious"));
     ok("case 12 (symlinked teams/zz/.claude, standalone): the run warns it left the dir alone", /left alone|refus/i.test(r12.stderr || ""), `${r12.status} ${r12.stdout}${r12.stderr}`);
+
+    // case 13, doctor walk stops at the toplevel (#17): a proteus link in the dir above the repo is neither listed nor removed
+    const T13 = tmp("above"), H13 = homeAt(path.join(T13, "home")), R13 = path.join(T13, "outer", "repo");
+    const up13 = path.join(T13, "outer", ".claude", "skills", "proteus"), in13 = path.join(R13, ".claude", "skills", "proteus");
+    fs.mkdirSync(R13, { recursive: true });
+    ok("case 13: the repo under T/outer is set up", teamRepo(R13, []).status === 0);
+    for (const l of [up13, in13]) { fs.mkdirSync(path.dirname(l), { recursive: true }); fs.symlinkSync(path.join(CHK, "skills", "proteus"), l, "junction"); }
+    const r13 = installer(["--doctor", "--fix"], R13, H13);
+    ok("case 13 (doctor above the toplevel): --doctor --fix removes the copy inside the repo", !lstat(in13), `${r13.status} ${r13.stdout}${r13.stderr}`);
+    ok("case 13 (doctor above the toplevel): no row names the link above the repo", !`${r13.stdout}${r13.stderr}`.includes(up13), `${r13.stdout}${r13.stderr}`);
+    ok("case 13 (doctor above the toplevel): the link above the repo survives", linkOf(up13) === path.join(CHK, "skills", "proteus"));
+
+    // case 14, standalone link-skills.js --confine (#17): HOME/.claude links into the (fake) real home, so removeLink refuses its skills/foo
+    const T14 = tmp("confinelink"), F14 = path.join(T14, "realhome"), H14 = path.join(T14, "fakehome"), R14 = path.join(T14, "repo");
+    const src14 = path.join(T14, "src", "foo"), g14 = path.join(F14, ".claude", "skills", "foo");
+    fs.mkdirSync(path.dirname(g14), { recursive: true });
+    fs.mkdirSync(src14, { recursive: true });
+    fs.writeFileSync(path.join(src14, "SKILL.md"), "---\nname: foo\ndescription: test skill\n---\n");
+    fs.symlinkSync(src14, g14, "junction");
+    fs.mkdirSync(H14);
+    fs.symlinkSync(path.join(F14, ".claude"), path.join(H14, ".claude"), "junction");
+    for (const d of [".agents", ".codex"]) fs.mkdirSync(path.join(H14, d));
+    fs.mkdirSync(path.join(R14, "teams", "zz"), { recursive: true });
+    fs.writeFileSync(path.join(R14, "teams", "zz", "skills.txt"), "a/b foo\n");
+    fs.copyFileSync(path.join(CHK, "templates", "teams", "link-skills.js"), path.join(R14, "teams", "link-skills.js"));
+    const r14 = nodeRun(path.join(R14, "teams", "link-skills.js"), ["--confine"], R14, H14);
+    ok("case 14 (symlinked .claude, standalone --confine): foo is linked into the team", linkOf(path.join(R14, "teams", "zz", ".claude", "skills", "foo")) === src14, `${r14.status} ${r14.stdout}${r14.stderr}`);
+    ok("case 14 (symlinked .claude, standalone --confine): the real home's skills/foo link survives", linkOf(g14) === src14, `${r14.status} ${r14.stderr}`);
+    ok("case 14 (symlinked .claude, standalone --confine): the run says it refused the global link", /refused\s+\S*foo/.test(r14.stderr || ""), `${r14.status} ${r14.stderr}`);
+
+    // case 15, allowedRoots (#17): a project toplevel that holds HOME or the user's home is never a delete root
+    const T15 = tmp("roots"), probe15 = path.join(TOOLS, "roots-probe.js");
+    fs.writeFileSync(probe15, `"use strict";\nconst [js, home, top] = process.argv.slice(2);\nconsole.log(JSON.stringify(require(js).allowedRoots(home, require("path").join(home, ".codex"), top)));\n`);
+    const roots15 = (home, top, extra) => {
+      for (const d of [home, top]) fs.mkdirSync(d, { recursive: true });
+      const r = nodeRun(probe15, [path.join(CHK, "install.js"), home, top], T15, home, extra);
+      try { return JSON.parse(r.stdout); } catch { return [`no roots: ${r.status} ${r.stdout}${r.stderr}`]; }
+    };
+    const top15 = path.join(T15, "tophome"), user15 = path.join(T15, "topuser"), plain15 = path.join(T15, "plain");
+    const a15 = roots15(path.join(top15, "home"), top15);
+    ok("case 15 (allowedRoots): a toplevel that holds HOME is left out", Array.isArray(a15) && a15.length > 0 && !a15.includes(real(top15)), JSON.stringify(a15));
+    const b15 = roots15(path.join(T15, "h"), user15, { NODE_OPTIONS: `--require ${preload}`, FAKE_USER_HOME: path.join(user15, "me") });
+    ok("case 15 (allowedRoots): a toplevel that holds the user's home is left out", Array.isArray(b15) && b15.length > 0 && !b15.includes(real(user15)), JSON.stringify(b15));
+    const c15 = roots15(path.join(T15, "h"), plain15);
+    ok("case 15 (allowedRoots): a toplevel that holds neither is a root", Array.isArray(c15) && c15.includes(real(plain15)), JSON.stringify(c15));
   }
 
   // case 3, grep: every rmSync, unlinkSync and rmdirSync in each file sits inside that file's one guard or remover
