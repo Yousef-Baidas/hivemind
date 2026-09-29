@@ -347,6 +347,36 @@ try {
     const rows9 = (r9.stdout || "").split("\n").filter((l) => l.includes(dupe9));
     ok("case 9 (doctor outside a repo): a row names the duplicate copy", rows9.length > 0, `${r9.status} ${r9.stdout}`);
     ok("case 9 (doctor outside a repo): the duplicate row does not recommend --doctor --fix", rows9.length > 0 && !rows9.some((l) => l.includes("--doctor --fix")), rows9.join(" | "));
+
+    // case 11, standalone install-lead-hooks.js: a committed .codex/hooks symlink out of the repo changes nothing outside it
+    const T11 = tmp("hooklink"), H11 = homeAt(path.join(T11, "home")), R11 = path.join(T11, "repo"), out11 = path.join(T11, "hooksout");
+    fs.mkdirSync(out11);
+    fs.writeFileSync(path.join(out11, "commit-msg.js"), "KEEP\n");
+    fs.mkdirSync(path.join(R11, ".codex"), { recursive: true });
+    fs.symlinkSync(out11, path.join(R11, ".codex", "hooks"), "junction");
+    ok("case 11: the repo with a symlinked .codex/hooks is set up", teamRepo(R11, []).status === 0);
+    const before11 = snapshot(T11, [R11, H11]);
+    const r11 = nodeRun(path.join(CHK, "templates", "hooks", "install-lead-hooks.js"), [], R11, H11, { PROTEUS_HARNESS: "codex" });
+    const moved11 = drift(before11, snapshot(T11, [R11, H11]));
+    ok("case 11 (symlinked .codex/hooks, standalone): nothing outside the repo is removed, changed or added", !moved11.length, `${moved11.join(", ")} | ${r11.status} ${r11.stderr}`);
+    ok("case 11 (symlinked .codex/hooks, standalone): the regular commit-msg.js outside survives", String(read(path.join(out11, "commit-msg.js"))) === "KEEP\n");
+    ok("case 11 (symlinked .codex/hooks, standalone): the run says it refused", /refus/i.test(r11.stderr || ""), `${r11.status} ${r11.stdout}${r11.stderr}`);
+
+    // case 12, standalone link-skills.js: a committed teams/zz/.claude symlink out of the repo changes nothing outside it
+    const T12 = tmp("teamlink"), H12 = homeAt(path.join(T12, "home")), R12 = path.join(T12, "repo"), out12 = path.join(T12, "outside");
+    fs.mkdirSync(path.join(H12, ".agents", "skills", "foo"), { recursive: true });
+    fs.writeFileSync(path.join(H12, ".agents", "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: test skill\n---\n");
+    fs.mkdirSync(path.join(out12, "skills"), { recursive: true });
+    dirLink(path.join(T12, "precious"), path.join(out12, "skills", "foo"));
+    fs.mkdirSync(path.join(R12, "teams", "zz"), { recursive: true });
+    fs.symlinkSync(out12, path.join(R12, "teams", "zz", ".claude"), "junction");
+    ok("case 12: the repo with a symlinked teams/zz/.claude is set up", teamRepo(R12, ["o/r foo"]).status === 0);
+    const before12 = snapshot(T12, [R12, H12]);
+    const r12 = nodeRun(path.join(CHK, "templates", "teams", "link-skills.js"), [], R12, H12);
+    const moved12 = drift(before12, snapshot(T12, [R12, H12]));
+    ok("case 12 (symlinked teams/zz/.claude, standalone): nothing outside the repo is removed, changed or added", !moved12.length, `${moved12.join(", ")} | ${r12.status} ${r12.stderr}`);
+    ok("case 12 (symlinked teams/zz/.claude, standalone): outside/skills/foo keeps its target", linkOf(path.join(out12, "skills", "foo")) === path.join(T12, "precious"));
+    ok("case 12 (symlinked teams/zz/.claude, standalone): the run warns it left the dir alone", /left alone|refus/i.test(r12.stderr || ""), `${r12.status} ${r12.stdout}${r12.stderr}`);
   }
 
   // case 3, grep: every rmSync, unlinkSync and rmdirSync in each file sits inside that file's one guard or remover
