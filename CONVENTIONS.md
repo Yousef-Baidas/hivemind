@@ -44,7 +44,7 @@ One rule per line. The verifier fails a diff that breaks one. Edited only by the
 
 ## Dependencies
 - Zero runtime dependencies, hard rule: shipped code (`install.js`, `templates/`, `teams/`, `skills/`) uses Node built-ins only, and `package.json` has no `dependencies`. A new dependency is a `NEEDS` to the human; the verifier fails a diff that adds one.
-- One dev-only exception (#8): `oxlint`, pinned exact in `devDependencies`, for the lint gate; config in `.oxlintrc.json`, never `oxlint.config.ts`. Nothing the installer runs may require it.
+- One dev-only exception (#8, #11): `oxlint` and `@oxlint/plugins`, both pinned exact to the same version in `devDependencies`, for the lint gate; config in `.oxlintrc.json`, never `oxlint.config.ts`. Nothing the installer runs may require it.
 - Vendored anti-slop plugin under `tools/oxlint/anti-slop/` keeps its upstream TypeScript and style; Style and Types rules apply everywhere else.
 - External CLIs via `execFileSync` with an args array, `windowsHide: true`, and a timeout.
 - Node 22.5+.

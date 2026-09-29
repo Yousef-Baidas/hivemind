@@ -80,7 +80,7 @@ function readList(file) {
 }
 
 function listFiles(dir) {
-  return ["required.txt", "skills.txt"].map((f) => path.join(dir, f)).filter(isFile);
+  return ["required.txt", "skills.txt"].flatMap((f) => { const p = path.join(dir, f); return isFile(p) ? [p] : []; });
 }
 
 // sha256 over relative path + content of every file; must stay byte-identical to the

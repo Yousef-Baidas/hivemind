@@ -2,7 +2,6 @@
 // Temp HOME, temp repos, fake gh; never touches ~/.claude or the network.
 "use strict";
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { spawnSync, execFileSync } = require("child_process");
 
@@ -125,7 +124,7 @@ ok("guard: PROTEUS_HANDOFF_HARD env", run(LG, pre("Agent", { model: "opus", suba
 // model ladder: the lead's model from the transcript's newest main-thread reply
 const withModel = (m, sideModel) => tr(`m-${m}.jsonl`, [JSON.stringify({ type: "assistant", message: { role: "assistant", model: m, content: [{ type: "text", text: "x" }], usage: { input_tokens: 10 } } }),
   ...(sideModel ? [JSON.stringify({ type: "assistant", isSidechain: true, message: { role: "assistant", model: sideModel, content: [], usage: { input_tokens: 5 } } })] : [])]);
-const spawn = (model, tp, opts) => run(LG, pre("Agent", { ...(model ? { model } : {}), subagent_type: "proteus-worker", prompt: "x" }, { transcript_path: tp }), opts);
+const spawn = (model, tp, opts) => run(LG, pre("Agent", { ...(model && { model }), subagent_type: "proteus-worker", prompt: "x" }, { transcript_path: tp }), opts);
 {
   const TF = withModel("claude-fable-5-1", "claude-sonnet-5-5"), TO = withModel("claude-opus-5-5[1m]"), TS = withModel("claude-sonnet-5-5"), TH = withModel("claude-haiku-4-5-20251001");
   r = spawn("", T100);
@@ -222,7 +221,7 @@ console.log(JSON.stringify([lib.ownedDenial("C:\\\\wt", "C:\\\\wt\\\\src\\\\ligh
   lib.ownedDenial("C:\\\\wt", "..\\\\x.ts"), lib.relPath("C:\\\\wt", "D:\\\\x.ts"), lib.relPath("C:\\\\wt", "C:\\\\wt\\\\..foo")]));`);
 const wr = JSON.parse(spawnSync(process.execPath, [winJs], { encoding: "utf8" }).stdout || "null") || [];
 ok("win: owned allowed, case-insensitive, backslash glob", wr[0] === "" && wr[1] === "" && wr[2] === "", JSON.stringify(wr));
-ok("win: other drive + ..\\ escape denied, relPath cross-drive null, ..foo inside", /^D:\/wt\/src\/lighting\/a\.ts is outside the worktree/.test(wr[3]) && /^\.\.\/x\.ts is outside/.test(wr[4]) && wr[5] === null && wr[6] === "..foo", JSON.stringify(wr));
+ok("win: other drive + ..\\ escape denied, relPath cross-drive null, ..foo inside", wr[3].startsWith("D:/wt/src/lighting/a.ts is outside the worktree") && wr[4].startsWith("../x.ts is outside") && wr[5] === null && wr[6] === "..foo", JSON.stringify(wr));
 ok("worker guard: bg denied", run(WH("proteus-worker-guard.js"), wpre("Bash", { command: "x", run_in_background: true }), { cwd: WT }).code === 2);
 ok("worker guard: Monitor denied", run(WH("proteus-worker-guard.js"), wpre("Monitor", {}), { cwd: WT }).code === 2);
 ok("worker guard: fg allowed", run(WH("proteus-worker-guard.js"), wpre("Bash", { command: "npm test" }), { cwd: WT }).code === 0);
@@ -489,7 +488,7 @@ ok("scratch --size", r.code === 0 && /^\d+\.\d MB$/.test(r.out.trim()), r.out + 
 // ---- autostart: aged safety sweep in the background, scratch= on the state line
 const HOURS = (h) => Date.now() - h * 3600e3;
 const aged = (name, key, h, dir = false) => {
-  const p = t(name); dir ? fs.mkdirSync(p) : fs.writeFileSync(p, "x");
+  const p = t(name); if (dir) fs.mkdirSync(p); else fs.writeFileSync(p, "x");
   const at = new Date(HOURS(h)); fs.utimesSync(p, at, at);
   fs.appendFileSync(LEDGER, JSON.stringify({ path: p, key, agent: "lead", at: HOURS(h), ino: fs.lstatSync(p).ino, worktree: false }) + "\n");
 };
@@ -582,9 +581,9 @@ ok("autostart: context-mode=missing when absent", / context-mode=missing( |$)/.t
 fs.mkdirSync(path.dirname(PLUG), { recursive: true });
 fs.writeFileSync(PLUG, JSON.stringify({ version: 2, plugins: { [CTX]: [{ scope: "user" }] } }));
 ok("autostart: context-mode=missing when installed but not enabled", /context-mode=missing/.test(asLine()));
-fs.writeFileSync(HSET, JSON.stringify({ ...(hsetBefore ? JSON.parse(hsetBefore) : {}), enabledPlugins: { [CTX]: true } }));
-ok("autostart: no context-mode flag when installed and enabled", /^proteus-state/.test(asLine()) && !/context-mode/.test(asLine()), asLine());
-fs.rmSync(path.dirname(PLUG), { recursive: true }); hsetBefore === null ? fs.rmSync(HSET) : fs.writeFileSync(HSET, hsetBefore);
+fs.writeFileSync(HSET, JSON.stringify({ ...JSON.parse(hsetBefore || "{}"), enabledPlugins: { [CTX]: true } }));
+ok("autostart: no context-mode flag when installed and enabled", asLine().startsWith("proteus-state") && !/context-mode/.test(asLine()), asLine());
+fs.rmSync(path.dirname(PLUG), { recursive: true }); if (hsetBefore === null) fs.rmSync(HSET); else fs.writeFileSync(HSET, hsetBefore);
 
 // install strips the keys of the removed classifier option, keeps the rest
 CH = chome("stale");
@@ -752,14 +751,14 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   ok("takeover: hivemind.json merged into proteus.json (proteus keys win) and removed", !has(TH, ".claude", "hivemind.json") && pj.autoUpdate === true &&
     JSON.stringify(pj.harnesses) === '["claude","codex"]' && pj.home === fs.realpathSync(path.dirname(INST)) && /is no longer used/.test(r.out), JSON.stringify(pj));
   const s2 = hj(S1), j2 = JSON.parse(s2);
-  ok("takeover: project hooks and registrations moved to Proteus, user hook kept", !fs.readdirSync(path.join(P1, ".claude", "hooks")).some((f) => /^hive-/.test(f)) &&
+  ok("takeover: project hooks and registrations moved to Proteus, user hook kept", !fs.readdirSync(path.join(P1, ".claude", "hooks")).some((f) => f.startsWith("hive-")) &&
     !/hive-/.test(s2) && /proteus-autostart\.js/.test(s2) && /my-own-hook/.test(s2) && /proteus-statusline\.js/.test(j2.statusLine.command), s2);
   const cj = hj(path.join(P1, ".codex", "hooks.json"));
-  ok("takeover: codex hooks and rules moved to Proteus", !fs.readdirSync(path.join(P1, ".codex", "hooks")).some((f) => /^hive-/.test(f)) && !/hive-/.test(cj) && /proteus-autostart\.js/.test(cj) &&
+  ok("takeover: codex hooks and rules moved to Proteus", !fs.readdirSync(path.join(P1, ".codex", "hooks")).some((f) => f.startsWith("hive-")) && !/hive-/.test(cj) && /proteus-autostart\.js/.test(cj) &&
     !has(P1, ".codex", "rules", "hivemind.rules") && has(P1, ".codex", "rules", "proteus.rules"), cj);
   const ex = hj(path.join(P1, ".git", "info", "exclude"));
   ok("takeover: exclude lines renamed", !/hive-\*|hive-owned|hivemind/.test(ex) && ex.includes(".claude/hooks/proteus-*.js") && ex.includes(".codex/rules/proteus.rules"), ex);
-  ok("takeover: committed old hook copies removed from teams/templates", !fs.readdirSync(path.join(P1, "teams", "templates", "hooks")).some((f) => /^hive-/.test(f)) &&
+  ok("takeover: committed old hook copies removed from teams/templates", !fs.readdirSync(path.join(P1, "teams", "templates", "hooks")).some((f) => f.startsWith("hive-")) &&
     has(P1, "teams", "templates", "hooks", "proteus-lib.js"), r.out);
   ok("takeover: scan lists the repo still on hivemind", r.out.includes(`cd "${P2}" && node "${INST}" --project`) && /--migrate-all/.test(r.out) && !r.out.includes(`cd "${P1}"`), r.out);
   r = run(INST, "", { args: ["--doctor"], cwd: P1, env: tenv() });

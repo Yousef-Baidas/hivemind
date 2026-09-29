@@ -31,7 +31,7 @@ const KINDS = {
 // Multi-agent v2 prefixes its tools with a namespace ("collaborationspawn_agent" by default, and
 // configurable), so a spawn is any name ending in spawn_agent.
 const TOOLS = { apply_patch: "edit", Bash: "shell", view_image: "read" };
-const toolKind = (name) => TOOLS[name] || (/spawn_agent$/.test(String(name || "")) ? "spawn" : "");
+const toolKind = (name) => TOOLS[name] || (String(name || "").endsWith("spawn_agent") ? "spawn" : "");
 
 // hooks get no project-dir variable; a hook installed in <root>/.codex/hooks knows its root
 const installedRoot = () => (path.basename(path.dirname(__dirname)) === ".codex" ? path.dirname(path.dirname(__dirname)) : "");
@@ -195,7 +195,7 @@ function tomlTables(text) {
   let cur = out[""];
   for (const l of String(text).split(/\r?\n/)) {
     if (/^\s*\[\[/.test(l)) { cur = {}; continue; } // an array of tables: nothing read here
-    const h = /^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$/.exec(l);
+    const h = /^\s*\[\s*([^[\]]+?)\s*\]\s*(#.*)?$/.exec(l);
     if (h) {
       const k = [...h[1].matchAll(/\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*(?:\.|$)/g)].map((m) => m[2] ?? m[3] ?? m[1]).join("\0");
       cur = out[k] = out[k] || {};
