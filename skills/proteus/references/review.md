@@ -12,9 +12,9 @@ Taste-driven runs (anything the human judges by eye or ear: a scene, an edit, a 
 
 ## Gate
 
-Fires after the last ticket of a milestone merges into `hive/<run>` and QA says `WAVE-GREEN`.
+Fires after the last ticket of a milestone merges into `proteus/<run>` and QA says `WAVE-GREEN`.
 
-1. Spawn `proteus-guide` with run, milestone, ticket numbers, diff range, QA verdict, gate commands, mode, debt issue. It opens the review issue `Review: <run>/<milestone>` (label `hive-review`, `needs-human`) with the brief, evidence links, and the open debt lines, so the human sees what was deferred, exits.
+1. Spawn `proteus-guide` with run, milestone, ticket numbers, diff range, QA verdict, gate commands, mode, debt issue. It opens the review issue `Review: <run>/<milestone>` (label `proteus-review`, `needs-human`) with the brief, evidence links, and the open debt lines, so the human sees what was deferred, exits.
 2. `PushNotification`: `review ready: <milestone> — <issue url>`. Print the url and `PROTEUS=0 claude → /proteus-review` in a second terminal (or `/remote-control` from the phone); on Codex `PROTEUS=0 codex → $proteus-review`.
 3. Wait: a background shell with the poll from `tracker.md` (Codex: `harnesses.md`), until a verdict comment exists. Dispatch nothing. Idle context costs nothing.
 4. Verdict comment, first line:
@@ -49,6 +49,6 @@ Only the literal word confirms. Then, per gate:
 
 ## What the human owns
 
-Merging `hive/<run>` into `main`; `CONVENTIONS.md` and its taste docs; the team roster and skills lists; every `NEEDS <dependency>`; every debt line at close; every review verdict, eventually, even the auto-accepted ones.
+Merging `proteus/<run>` into `main`; `CONVENTIONS.md` and its taste docs; the team roster and skills lists; every `NEEDS <dependency>`; every debt line at close; every review verdict, eventually, even the auto-accepted ones.
 
 A review note that states a standing preference ("always", "never", "I like it when") is a house default: ask the human to add it to `CONVENTIONS.md` (or approve a ticket that does), so no later round teaches it again.

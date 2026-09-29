@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The human's inbox: open needs-human issues, split into questions (hive-question) and
-// reviews (hive-review), cached in <git-common-dir>/hive/inbox.json.
+// The human's inbox: open needs-human issues, split into questions (proteus-question) and
+// reviews (proteus-review), cached in <git-common-dir>/proteus/inbox.json.
 //   node .claude/hooks/proteus-inbox.js            one line per item, from the cache
 //   node .claude/hooks/proteus-inbox.js --refresh  query gh, rewrite the cache, then print
 //   node .claude/hooks/proteus-inbox.js --count    "<questions> <reviews>"

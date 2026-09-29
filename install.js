@@ -24,7 +24,7 @@
 //   --harness codex                   any of the above for OpenAI Codex CLI instead (or PROTEUS_HARNESS=codex;
 //                                     default claude): skills linked into ~/.agents/skills, agents as
 //                                     TOML in $CODEX_HOME/agents, the lead's hooks in .codex/hooks.json
-//                                     and .codex/rules/proteus.rules, ../<repo>-hive writable in
+//                                     and .codex/rules/proteus.rules, ../<repo>-proteus writable in
 //                                     .codex/config.toml; --update reinstalls every
 //                                     harness recorded in ~/.claude/proteus.json
 //   --scan <dir>                      where to look for repos still on hivemind (default ~/Projects)
@@ -520,7 +520,7 @@ function projectInstall(root, opt) {
   return ok;
 }
 
-// workspace-write keeps a Codex worker out of ../<repo>-hive/ unless the project names it
+// workspace-write keeps a Codex worker out of ../<repo>-proteus/ unless the project names it
 function sandboxRoots(root) {
   const w = cx().sandboxRoots(root);
   if (w.error) warn(`warning: ${w.error}`);
@@ -829,7 +829,7 @@ async function doctor(fix) {
   // the checkout gets project checks once --project has set it up (self-host)
   const checkout = top.ok && samePath(real(top.out), real(HERE));
   const inRepo = top.ok && (!checkout || isProteusProject(top.out, cxh ? "codex" : "claude"));
-  const hive = inRepo && isDir(path.join(root, "teams"));
+  const isProject = inRepo && isDir(path.join(root, "teams"));
   const self = `node "${path.join(HERE, "install.js")}"${cxh ? " --harness codex" : ""}`;
   const hd = cxh ? ".codex" : ".claude";
   const checks = [];
@@ -966,7 +966,7 @@ async function doctor(fix) {
       if (m.found.length) return ["FIX", `hivemind's pieces in this repo: ${m.found.join(", ")}`, `${self} --project`];
       return m.kept.length ? ["WARN", `hivemind's, left alone in this repo: ${m.kept.join("; ")}`, "move, edit or delete them yourself"] : ["ok", "no hivemind pieces in this repo"];
     }, () => migrateRepo(root, {}, [HARNESS]));
-    if (!hive) {
+    if (!isProject) {
       check(() => ["WARN", "not a Proteus project (no teams/)", `${self} --project`]);
     } else {
       check(() => isFile(path.join(root, "teams", "ROUTING.md")) ? ["ok", "teams/ROUTING.md"]
@@ -997,7 +997,7 @@ async function doctor(fix) {
         const r = spawnSync(process.execPath, [path.join(HERE, "templates", "hooks", "proteus-scratch.js"), "--size"], { cwd: root, encoding: "utf8", timeout: 60000 });
         const mb = parseFloat(r.stdout);
         if (r.status !== 0 || !Number.isFinite(mb)) return ["WARN", "scratch size unknown", `node ${hd}/hooks/proteus-scratch.js --size`];
-        return mb > 1024 ? ["WARN", `hive scratch holds ${mb} MB`, `node ${hd}/hooks/proteus-scratch.js --sweep --all-done`] : ["ok", `hive scratch ${mb} MB`];
+        return mb > 1024 ? ["WARN", `scratch holds ${mb} MB`, `node ${hd}/hooks/proteus-scratch.js --sweep --all-done`] : ["ok", `scratch ${mb} MB`];
       });
       check(() => {
         const teams = path.join(root, "teams");
@@ -1013,7 +1013,7 @@ async function doctor(fix) {
       // has no .claude/hooks/commit-msg.js, and .codex/hooks is machine-local)
       check(() => {
         const found = [], bad = [];
-        for (const f of ["lefthook.yml", ".github/workflows/hive-gates.yml"]) {
+        for (const f of ["lefthook.yml", ".github/workflows/proteus-gates.yml"]) {
           for (const m of (readText(path.join(root, f)) || "").matchAll(/\bnode\s+["']?([^\s"']*commit-msg\.js)/g)) {
             found.push(f);
             if (!git(["ls-files", "--error-unmatch", "--", m[1]], root).ok) bad.push(`${f} runs ${m[1]}`);

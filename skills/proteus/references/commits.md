@@ -1,6 +1,6 @@
 # Commits
 
-Every agent in the hive commits the same way. Terse, exact, professional. The diff says what; the message says why.
+Every Proteus agent commits the same way. Terse, exact, professional. The diff says what; the message says why.
 
 ## Subject
 

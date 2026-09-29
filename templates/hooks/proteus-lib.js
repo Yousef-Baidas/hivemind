@@ -23,7 +23,7 @@ function run(main) {
   process.stdin.on("end", async () => {
     let raw = {};
     try { raw = JSON.parse(input) || {}; } catch {}
-    try { const ad = harness(); await main(ad.event(raw), ad); } catch (e) { if (process.env.PROTEUS_DEBUG) process.stderr.write(`hive hook: ${e.stack}\n`); }
+    try { const ad = harness(); await main(ad.event(raw), ad); } catch (e) { if (process.env.PROTEUS_DEBUG) process.stderr.write(`proteus hook: ${e.stack}\n`); }
     // pipes are async on macOS: exit only once stdout has drained
     process.stdout.write("", () => process.exit(0));
   });
@@ -63,7 +63,7 @@ function gitCommonDir(root) {
 // main checkout root: the common dir's parent when it is a .git dir (null for bare repos)
 const mainRoot = (common) => (common && path.basename(common) === ".git" ? path.dirname(common) : null);
 
-const hiveDir = (common) => path.join(common, "hive");
+const stateDir = (common) => path.join(common, "proteus");
 
 function readJSON(file, dflt) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return dflt; }
@@ -97,10 +97,10 @@ function gitRoot(dir) {
   }
 }
 
-// a hive/* branch exists: loose refs or packed-refs, no git call
+// a proteus/* branch exists: loose refs or packed-refs, no git call
 function runOpen(common) {
-  try { if (fs.readdirSync(path.join(common, "refs", "heads", "hive")).length) return true; } catch {}
-  try { return /^\S+ refs\/heads\/hive\//m.test(fs.readFileSync(path.join(common, "packed-refs"), "utf8")); } catch { return false; }
+  try { if (fs.readdirSync(path.join(common, "refs", "heads", "proteus")).length) return true; } catch {}
+  try { return /^\S+ refs\/heads\/proteus\//m.test(fs.readFileSync(path.join(common, "packed-refs"), "utf8")); } catch { return false; }
 }
 
 // owned-path glob: ** any depth, * within a segment, trailing / means the whole directory
@@ -185,9 +185,9 @@ function syncText(a, dst) {
   return true;
 }
 
-// The human's inbox: open needs-human issues, cached in <common>/hive/inbox.json as
+// The human's inbox: open needs-human issues, cached in <common>/proteus/inbox.json as
 // {at, questions:[{n,title}], reviews:[{n,title}]}. null when there is no cache.
-const inboxFile = (common) => path.join(hiveDir(common), "inbox.json");
+const inboxFile = (common) => path.join(stateDir(common), "inbox.json");
 function readInbox(common) {
   const c = readJSON(inboxFile(common), null);
   return c && Array.isArray(c.questions) && Array.isArray(c.reviews) ? c : null;
@@ -212,7 +212,7 @@ function rungOf(ladder, name) {
 // the session's model, as the harness finds it
 const leadModel = (ev) => harness().sessionModel(ev);
 // the model SessionStart reported, kept by the autostart for when the transcript tail has no reply
-const leadFile = (root) => { const c = gitCommonDir(root); return c ? path.join(hiveDir(c), "lead-model.json") : null; };
+const leadFile = (root) => { const c = gitCommonDir(root); return c ? path.join(stateDir(c), "lead-model.json") : null; };
 function saveLead(ev, root) {
   const f = leadFile(root);
   if (f && ev.model && ev.session) writeJSON(f, { session: ev.session, model: ev.model });
@@ -264,14 +264,14 @@ function refreshInbox(root, common, timeout = 10000) {
   if (!Array.isArray(list)) return null;
   const has = (i, name) => (i.labels || []).some((l) => l && l.name === name);
   const item = (i) => ({ n: i.number, title: String(i.title || "") });
-  const inbox = { at: new Date().toISOString(), questions: list.filter((i) => has(i, "hive-question")).map(item), reviews: list.filter((i) => has(i, "hive-review")).map(item) };
+  const inbox = { at: new Date().toISOString(), questions: list.filter((i) => has(i, "proteus-question")).map(item), reviews: list.filter((i) => has(i, "proteus-review")).map(item) };
   writeJSON(inboxFile(common), inbox);
   return inbox;
 }
 
 module.exports = {
   readInbox, refreshInbox, inboxFile,
-  run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, hiveDir, readJSON, writeJSON,
+  run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, stateDir, readJSON, writeJSON,
   configFile, proteusConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
   workerDenial, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, syncText, WAIT_MSG, EDIT_LAST_MSG,
 };
