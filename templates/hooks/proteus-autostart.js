@@ -7,7 +7,9 @@
 // behind-count feeds the status line), offers the tour while it is pending (tour=…), and after
 // a compaction (or a startup with an open run) re-injects the run-log tail and, after a
 // compaction, the human's last ten messages from the journal. Starts the scratch safety sweep
-// (proteus-scratch.js --sweep --stale) detached, so it never slows the start.
+// (proteus-scratch.js --sweep --stale) detached, so it never slows the start. Moves the state a
+// pre-rename install left in the legacy state dir into <git-common-dir>/proteus (lib.migrateState),
+// and lists open runs on either branch prefix: a legacy run keeps its names until it closes.
 // Silent (no autostart) when: PROTEUS=0, inside a subagent, or in a linked worktree
 // (workers and the review session's fresh checkout are not the lead).
 "use strict";
@@ -34,7 +36,8 @@ lib.run((ev, ad) => {
     behind = safe(() => update(home, cfg, notes), 0);
     safe(() => sync(ad, home, root, notes));
   }
-  const runs = runBranches(root);
+  safe(() => migrateState(root, home, notes));
+  const runs = lib.runBranches(lib.gitCommonDir(root)).slice(0, 10);
   const src = ev.source;
   const tour = home && (src === "startup" || src === "clear") ? safe(() => tourState(home, cfg), "") : "";
   const state = localState(ad, root, runs, home, behind) + " " + safe(() => inboxState(root), "inbox=unknown") + " " + safe(() => models(ev, root), "models=unknown");
@@ -171,17 +174,24 @@ function scratchSweep(root) {
   c.unref();
 }
 
-function runBranches(root) {
-  const runs = lib.git(["-C", root, "branch", "--list", "proteus/*", "--format=%(refname:short)"], root).split("\n").filter(Boolean);
-  // proteus/<run>-<id> are worker branches; keep only the run branches
-  return runs.filter((b) => !runs.some((a) => a !== b && b.startsWith(a + "-"))).slice(0, 10);
+// state an install from before the rename left in the legacy dir moves into stateDir (never
+// overwriting), so the journal survives an auto-update that never re-ran the installer; what stays is named
+function migrateState(root, home, notes) {
+  const common = lib.gitCommonDir(root);
+  const r = lib.migrateState(common);
+  if (!r.kept.length) return;
+  const cmd = home ? `node "${path.join(home, "install.js")}" --doctor` : "install.js --doctor";
+  notes.push(`proteus: ${lib.legacyStateDir(common)} kept ${r.kept.join(", ")} (already in ${lib.stateDir(common)}); ${cmd} names them`);
 }
 
+// the open run's log issue; a run opened before the rename is labelled with the legacy log label
 function runLogTail(root, runs) {
-  const list = JSON.parse(lib.gh(["issue", "list", "--label", "proteus-log", "--state", "open", "--json", "number,title", "--limit", "5"], root) || "null");
+  const find = (label) => JSON.parse(lib.gh(["issue", "list", "--label", label, "--state", "open", "--json", "number,title", "--limit", "5"], root) || "null");
+  let list = find(lib.CURRENT.log);
+  if (Array.isArray(list) && !list.length && runs.some((b) => lib.schemeOf(b) === lib.LEGACY)) list = find(lib.LEGACY.log);
   if (!Array.isArray(list)) return "";
-  if (!list.length) return "run-log: no open issue labelled proteus-log.";
-  const pick = list.find((i) => runs.some((r) => String(i.title).includes(r.replace(/^proteus\//, "")))) || list[0];
+  if (!list.length) return `run-log: no open issue labelled ${lib.CURRENT.log}.`;
+  const pick = list.find((i) => runs.some((r) => String(i.title).includes(lib.runName(r)))) || list[0];
   const view = JSON.parse(lib.gh(["issue", "view", String(pick.number), "--json", "comments"], root) || "{}");
   const bodies = ((view && view.comments) || []).slice(-12).map((c) => String((c && c.body) || "").trim()).filter(Boolean);
   const kept = [];
@@ -207,7 +217,9 @@ function inboxState(root) {
 function humanSaid(root) {
   const common = lib.gitCommonDir(root);
   if (!common) return "";
-  const lines = lib.tailLines(path.join(lib.stateDir(common), "journal.jsonl"), 512 * 1024).slice(-10);
+  // a journal the migration could not move (one already in stateDir wins) is still read
+  const file = [lib.stateDir(common), lib.legacyStateDir(common)].map((d) => path.join(d, "journal.jsonl")).find((f) => fs.existsSync(f));
+  const lines = lib.tailLines(file, 512 * 1024).slice(-10);
   const said = lines.map((l) => safe(() => JSON.parse(l).prompt, "")).filter((p) => typeof p === "string" && p.trim())
     .map((p) => "- " + (p.length > 400 ? p.slice(0, 400) + "…" : p).replace(/\n/g, "\n  "));
   return said.length ? ["human said (verbatim, newest last):", ...said].join("\n") : "";

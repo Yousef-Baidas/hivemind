@@ -11,7 +11,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { tailLines } = require(path.join(__dirname, "proteus-lib.js"));
+const { tailLines, legacyWorktreeDir, legacyWorktrees } = require(path.join(__dirname, "proteus-lib.js"));
 const claude = require(path.join(__dirname, "proteus-harness-claude.js"));
 
 const name = "codex";
@@ -287,8 +287,10 @@ function registerLead(root) {
 
 // Worker worktrees live in ../<repo>-proteus/, outside the project, where workspace-write rejects a
 // worker's apply_patch. The project's .codex/config.toml adds that folder to writable_roots; a
-// textual merge (no TOML parser here) that refuses any shape it cannot edit safely.
-// Returns {file, dir, created, changed, missing} or {file, dir, error}; write=false only checks.
+// textual merge (no TOML parser here) that refuses any shape it cannot edit safely. The legacy
+// worktree folder a run from before the rename used stays listed while git still has a worktree
+// registered in it (legacy: {dir, worktrees}), and goes once none is (stale: that dir).
+// Returns {file, dir, created, changed, missing, legacy, stale} or {file, dir, error}; write=false only checks.
 function sandboxRoots(root, write = true) {
   const abs = path.resolve(root);
   const dir = path.join(path.dirname(abs), `${path.basename(abs)}-proteus`);
@@ -328,26 +330,51 @@ function sandboxRoots(root, write = true) {
   let i = text.indexOf("=", start) + 1;
   while (/[ \t]/.test(text[i] || "")) i++;
   if (text[i] !== "[") return refuse("sets writable_roots to something other than an array");
+  const open = i;
   const vals = [];
-  let last = "[";
   for (i++; i < text.length; i++) {
     const c = text[i];
     if (/\s/.test(c)) continue;
     if (c === "#") { while (i < text.length && text[i] !== "\n") i++; continue; }
     if (c === "]") break;
-    if (c === ",") { last = ","; continue; }
+    if (c === ",") continue;
     const m = c === '"' ? /^"((?:[^"\\\n]|\\.)*)"/.exec(text.slice(i)) : c === "'" ? /^'([^'\n]*)'/.exec(text.slice(i)) : null;
     if (!m) return refuse("has a writable_roots value this installer cannot read");
     let v = m[1];
     if (c === '"') { try { v = JSON.parse(`"${v}"`); } catch {} }
-    vals.push(v); last = "v"; i += m[0].length - 1;
+    vals.push({ v, start: i, end: i + m[0].length }); i += m[0].length - 1;
   }
   if (text[i] !== "]") return refuse("has an unterminated writable_roots array");
-  if (vals.some((v) => path.resolve(v) === dir)) {
+  const old = legacyWorktreeDir(abs);
+  const isOld = (x) => path.resolve(x.v) === old;
+  const live = vals.some(isOld) ? legacyWorktrees(abs) : [];
+  const legacy = live.length ? { dir: old, worktrees: live } : null;
+  const drop = live.length ? [] : vals.filter(isOld);
+  const stale = drop.length ? old : null;
+  const has = vals.some((x) => path.resolve(x.v) === dir);
+  if (has && !stale) {
     if (write) fs.mkdirSync(dir, { recursive: true });
-    return { file, dir, created: false, changed: false };
+    return { file, dir, created: false, changed: false, legacy };
   }
-  return done(`${text.slice(0, i)}${last === "v" ? ", " : ""}${entry}${text.slice(i)}`, false);
+  if (!write) return { file, dir, missing: !has, stale, legacy };
+  // the stale entries go with one comma beside each, then ours goes in before the ]
+  let next = text, shut = i;
+  for (const x of [...drop].reverse()) {
+    let a = x.start, b = x.end;
+    const after = /^[ \t]*,[ \t]*/.exec(next.slice(b));
+    const before = !after && /,\s*$/.exec(next.slice(0, a));
+    if (after) b += after[0].length;
+    else if (before) a -= before[0].length;
+    next = next.slice(0, a) + next.slice(b);
+    shut -= b - a;
+  }
+  if (!has) {
+    const body = next.slice(open + 1, shut).split("\n").map((l) => l.replace(/#.*$/, "")).join("\n").trim();
+    next = `${next.slice(0, shut)}${body && !body.endsWith(",") ? ", " : ""}${entry}${next.slice(shut)}`;
+  }
+  fs.writeFileSync(file, next);
+  fs.mkdirSync(dir, { recursive: true });
+  return { file, dir, created: false, changed: true, legacy, stale };
 }
 
 // Subagents run in the lead's session under its hooks, which enforce owned paths; the copies

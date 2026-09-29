@@ -253,7 +253,11 @@ Proteus was called hivemind. Install Proteus as above, or run `install.js --upda
 - With `--project` it moves the current repo: removes the `hive-*.js` hooks and their entries in `.claude/settings.local.json` and `.codex/hooks.json`, hivemind's status line, `.codex/rules/hivemind.rules`, and the unedited `teams/templates/hooks/hive-*.js` copies (commit that), renames the lines in `.git/info/exclude`, then installs Proteus for every CLI hivemind was set up for there.
 - It lists the other repos under `~/Projects` (`--scan <dir>` for elsewhere, three levels deep) still on hivemind, with the command for each; `--migrate-all` moves them all.
 
-Kept as they were: the `hive/<run>` and `hive-evidence/<run>` branches, the `hive*` GitHub labels, `.git/hive/`, the `../<repo>-hive/` worktree folder, and `hive-gates.yml`. A worker worktree already in flight keeps hivemind's hooks until it merges, and the old lines in `.git/info/exclude` stay beside the new ones until then; `--doctor --fix` drops them after. There is no `/hivemind` alias and no `HIVEMIND=0`: use `/proteus` and `PROTEUS=0`.
+- It moves hivemind's state, `.git/hive/`, into `.git/proteus/` (the inbox, scratch, the lead journal, the lead model). The session start does the same on its own, so a repo you never re-run the installer in still moves. Nothing already in `.git/proteus/` is overwritten: a file on both sides stays in `.git/hive/`, the output names it, and `--doctor` keeps showing it until you pick one and delete the other.
+
+A run opened under hivemind finishes under its old names: the lead, `--status`, scratch and the lead guard read both `hive/<run>` and `proteus/<run>`, so an open `hive/<run>` still counts as the run and its PRs, labels and log issue are still found. New runs use the Proteus names. With Codex, `--project` keeps `../<repo>-hive/` in `writable_roots` beside `../<repo>-proteus/` while git still has a worktree registered there, says why, and drops it on the first `--project` after the last one is gone. The tracker's label step creates the `proteus*` labels in a repo that only has the `hive*` ones and records `labels: proteus`.
+
+Kept as they were: the `hive/<run>` and `hive-evidence/<run>` branches, the `hive*` GitHub labels, and `hive-gates.yml`. A worker worktree already in flight keeps hivemind's hooks until it merges, and the old lines in `.git/info/exclude` stay beside the new ones until then; `--doctor --fix` drops them after. There is no `/hivemind` alias and no `HIVEMIND=0`: use `/proteus` and `PROTEUS=0`.
 
 ### Check the install
 

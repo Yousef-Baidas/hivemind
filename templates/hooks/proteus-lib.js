@@ -65,6 +65,89 @@ const mainRoot = (common) => (common && path.basename(common) === ".git" ? path.
 
 const stateDir = (common) => path.join(common, "proteus");
 
+// a run's names: its branch prefix, evidence prefix, labels, and the sibling folder its worker worktrees use
+const CURRENT = { branch: "proteus/", evidence: "proteus-evidence/", label: "proteus", log: "proteus-log", review: "proteus-review", debt: "proteus-debt", question: "proteus-question", worktrees: "-proteus" };
+
+// legacy-hive:start
+// hivemind, the old name (#6): a run opened before the rename keeps these names until it closes, and its
+// state dir moves into stateDir. Every legacy name the hooks know is here; the rest import it.
+const LEGACY = { branch: "hive/", evidence: "hive-evidence/", label: "hive", log: "hive-log", review: "hive-review", debt: "hive-debt", question: "hive-question", worktrees: "-hive", state: "hive", owned: "hive-owned" };
+const legacyStateDir = (common) => path.join(common, LEGACY.state);
+// the worker worktree folder a legacy run used, beside the checkout
+const legacyWorktreeDir = (root) => { const abs = path.resolve(root); return path.join(path.dirname(abs), path.basename(abs) + LEGACY.worktrees); };
+
+// worktrees git still has registered under legacyWorktreeDir(root): <common>/worktrees/*/gitdir, no git call
+function legacyWorktrees(root) {
+  const common = gitCommonDir(root);
+  const dir = legacyWorktreeDir(root);
+  const out = [];
+  let ids = [];
+  try { ids = fs.readdirSync(path.join(common, "worktrees")); } catch { return out; }
+  for (const id of ids) {
+    let wt;
+    try { wt = path.dirname(path.resolve(fs.readFileSync(path.join(common, "worktrees", id, "gitdir"), "utf8").trim())); } catch { continue; }
+    const r = path.relative(dir, wt);
+    if (r && !r.startsWith("..") && !path.isAbsolute(r)) out.push(wt);
+  }
+  return out;
+}
+
+// move legacyStateDir's contents into stateDir: never overwrites, merges directories, drops the legacy dir
+// once empty. {moved, kept} are paths relative to the legacy dir; kept ones exist on both sides.
+// dry: only report what a move would do.
+function migrateState(common, dry) {
+  const res = { moved: [], kept: [] };
+  const from = common && legacyStateDir(common);
+  if (!from || !fs.existsSync(from) || !fs.lstatSync(from).isDirectory()) return res;
+  const walk = (src, dst, rel) => {
+    let names = [];
+    try { names = fs.readdirSync(src).sort(); } catch { return; }
+    for (const n of names) {
+      const s = path.join(src, n), d = path.join(dst, n), r = rel ? `${rel}/${n}` : n;
+      let ds = null;
+      try { ds = fs.lstatSync(d); } catch {}
+      if (!ds) {
+        if (dry) { res.moved.push(r); continue; }
+        try { fs.mkdirSync(dst, { recursive: true }); fs.renameSync(s, d); res.moved.push(r); } catch { res.kept.push(r); }
+      } else if (ds.isDirectory() && fs.lstatSync(s).isDirectory()) {
+        walk(s, d, r);
+        if (!dry) try { fs.rmdirSync(s); } catch {}
+      } else res.kept.push(r);
+    }
+  };
+  walk(from, stateDir(common), "");
+  if (!dry) try { fs.rmdirSync(from); } catch {}
+  return res;
+}
+// legacy-hive:end
+
+const SCHEMES = [CURRENT, LEGACY];
+// the naming scheme a run or worker branch is on, null for any other branch
+const schemeOf = (branch) => SCHEMES.find((s) => String(branch).startsWith(s.branch)) || null;
+// the run (or <run>-<id>) a branch names, without its prefix
+const runName = (branch) => { const s = schemeOf(branch); return s ? String(branch).slice(s.branch.length) : String(branch); };
+
+// every run and worker branch under both schemes: loose refs and packed-refs, no git call
+function runRefs(common) {
+  const out = new Set();
+  if (!common) return [];
+  let packed = "";
+  try { packed = fs.readFileSync(path.join(common, "packed-refs"), "utf8"); } catch {}
+  for (const s of SCHEMES) {
+    const dir = path.join(common, "refs", "heads", s.branch.slice(0, -1));
+    try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) if (e.isFile()) out.add(s.branch + e.name); } catch {}
+    const esc = s.branch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    for (const m of packed.matchAll(new RegExp(`^[0-9a-f]+ refs/heads/(${esc}[^/\\s]+)$`, "gm"))) out.add(m[1]);
+  }
+  return [...out].sort();
+}
+
+// run branches only: <prefix><run>-<id> is a worker branch of <prefix><run>
+function runBranches(common) {
+  const refs = runRefs(common);
+  return refs.filter((b) => !refs.some((a) => a !== b && b.startsWith(a + "-")));
+}
+
 function readJSON(file, dflt) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return dflt; }
 }
@@ -97,11 +180,8 @@ function gitRoot(dir) {
   }
 }
 
-// a proteus/* branch exists: loose refs or packed-refs, no git call
-function runOpen(common) {
-  try { if (fs.readdirSync(path.join(common, "refs", "heads", "proteus")).length) return true; } catch {}
-  try { return /^\S+ refs\/heads\/proteus\//m.test(fs.readFileSync(path.join(common, "packed-refs"), "utf8")); } catch { return false; }
-}
+// a run is open: a run or worker branch exists under either scheme
+const runOpen = (common) => runRefs(common).length > 0;
 
 // owned-path glob: ** any depth, * within a segment, trailing / means the whole directory
 function ownedMatch(glob, rel) {
@@ -111,10 +191,10 @@ function ownedMatch(glob, rel) {
 }
 
 // a worktree the lead dispatched a worker into: it lists the ticket's owned paths
-// a worktree dispatched before the rename carries hive-owned; read it until that run merges
+// a worktree dispatched before the rename carries the legacy list; read it until that run merges
 const ownedFile = (wt) => {
   const f = harness().ownedFile(wt);
-  const old = path.join(path.dirname(f), "hive-owned");
+  const old = path.join(path.dirname(f), LEGACY.owned);
   return !fs.existsSync(f) && fs.existsSync(old) ? old : f;
 };
 
@@ -264,7 +344,7 @@ function refreshInbox(root, common, timeout = 10000) {
   if (!Array.isArray(list)) return null;
   const has = (i, name) => (i.labels || []).some((l) => l && l.name === name);
   const item = (i) => ({ n: i.number, title: String(i.title || "") });
-  const inbox = { at: new Date().toISOString(), questions: list.filter((i) => has(i, "proteus-question")).map(item), reviews: list.filter((i) => has(i, "proteus-review")).map(item) };
+  const inbox = { at: new Date().toISOString(), questions: list.filter((i) => SCHEMES.some((s) => has(i, s.question))).map(item), reviews: list.filter((i) => SCHEMES.some((s) => has(i, s.review))).map(item) };
   writeJSON(inboxFile(common), inbox);
   return inbox;
 }
@@ -272,6 +352,7 @@ function refreshInbox(root, common, timeout = 10000) {
 module.exports = {
   readInbox, refreshInbox, inboxFile,
   run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, stateDir, readJSON, writeJSON,
+  CURRENT, LEGACY, SCHEMES, schemeOf, runName, runRefs, runBranches, legacyStateDir, legacyWorktreeDir, legacyWorktrees, migrateState,
   configFile, proteusConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
   workerDenial, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, syncText, WAIT_MSG, EDIT_LAST_MSG,
 };
