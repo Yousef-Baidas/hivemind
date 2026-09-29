@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dev-only tooling for the Proteus source repo; the installer itself has zero dependencies.",
   "scripts": {
-    "lint": "oxlint",
+    "lint": "oxlint --deny-warnings",
     "test": "node tests/run.js"
   },
   "devDependencies": {

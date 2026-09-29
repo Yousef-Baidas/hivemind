@@ -1,3 +1,4 @@
+// oxlint config for the lint gate (npm run lint), loading the vendored anti-slop plugin; exits 1 on any finding (--deny-warnings), 0 when clean.
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "ignorePatterns": [
