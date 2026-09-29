@@ -1,0 +1,24 @@
+name: ci
+on:
+  push:
+    branches: [main, "hive/**", "proteus/**"]
+  pull_request:
+    branches: [main, "hive/**", "proteus/**"]
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}   # the PR head, not the synthetic merge commit
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tests/run.js
+      - name: commit messages
+        if: github.event_name == 'pull_request'
+        run: |
+          for c in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
+            git log -1 --format=%B "$c" > "$RUNNER_TEMP/msg" && node templates/hooks/commit-msg.js "$RUNNER_TEMP/msg" || exit 1
+          done
