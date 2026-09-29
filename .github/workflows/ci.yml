@@ -1,4 +1,4 @@
-# Gates for main, hive/** and proteus/**: node tests/run.js on push and pull_request; on pull_request also lints every commit message with templates/hooks/commit-msg.js.
+# Gates for main, hive/** and proteus/**: npm ci, npm run lint, node tests/run.js on push and pull_request; on pull_request also lints every commit message with templates/hooks/commit-msg.js.
 name: ci
 on:
   push:
@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm ci
+      - run: npm run lint
       - run: node tests/run.js
       - name: commit messages
         if: github.event_name == 'pull_request'
