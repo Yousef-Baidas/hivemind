@@ -294,8 +294,10 @@ templates/
     hive-status.js  hive-inbox.js  hive-statusline.js   status, open questions, status line
     hive-worktree.js         prepares a worker worktree and its hooks
     hive-scratch.js          ledgers and sweeps agents' temp files
-    hive-owned-paths.js  commit-msg.js  hive-lib.js
+    hive-owned-paths.js  commit-msg.js  hive-lib.js   shared core
+    hive-harness.js  hive-harness-claude.js   CLI adapter (HIVE_HARNESS picks it)
 install.js                   installer, updater, doctor (install.sh / install.ps1 wrap it)
+tests/hooks.test.js          node tests/hooks.test.js: hooks and installer against temp repos and a fake gh
 ```
 
 ## Uninstall

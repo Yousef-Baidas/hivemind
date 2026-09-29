@@ -1,4 +1,5 @@
-// Shared helpers for the hive-*.js hooks. Plain Node, no dependencies, no shell.
+// Shared core of the hive-*.js hooks: git, ownership, the ladder, the inbox. Plain Node, no
+// dependencies, no shell, nothing specific to one coding-agent CLI (that is hive-harness.js).
 // Every hook fails open: an internal error exits 0 and never blocks the session.
 "use strict";
 const fs = require("fs");
@@ -6,7 +7,13 @@ const path = require("path");
 const os = require("os");
 const { execFileSync } = require("child_process");
 
-// read the hook's stdin JSON, run main(ev); any throw or rejection exits 0
+// the harness adapter. The adapter requires this file too: it is loaded at the end, once this
+// file's exports are complete, and taken again on use if a load that began at the adapter left it partial.
+const HARNESS = path.join(__dirname, "hive-harness.js");
+let adapter = null;
+const harness = () => (adapter && adapter.event ? adapter : (adapter = require(HARNESS)));
+
+// read the hook's stdin JSON, run main(hive event, adapter); any throw or rejection exits 0
 function run(main) {
   process.on("uncaughtException", () => process.exit(0));
   process.on("unhandledRejection", () => process.exit(0));
@@ -14,15 +21,16 @@ function run(main) {
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (c) => (input += c));
   process.stdin.on("end", async () => {
-    let ev = {};
-    try { ev = JSON.parse(input) || {}; } catch {}
-    try { await main(ev); } catch (e) { if (process.env.HIVE_DEBUG) process.stderr.write(`hive hook: ${e.stack}\n`); }
+    let raw = {};
+    try { raw = JSON.parse(input) || {}; } catch {}
+    try { const ad = harness(); await main(ad.event(raw), ad); } catch (e) { if (process.env.HIVE_DEBUG) process.stderr.write(`hive hook: ${e.stack}\n`); }
     // pipes are async on macOS: exit only once stdout has drained
     process.stdout.write("", () => process.exit(0));
   });
 }
 
-const projectRoot = (ev) => process.env.CLAUDE_PROJECT_DIR || (ev && ev.cwd) || process.cwd();
+// the project dir: the event's, else the one the harness reports outside a hook
+const projectRoot = (ev) => (ev && ev.root) || harness().projectRoot({});
 
 // linked worktree: .git is a file pointing at the main checkout
 function isLinked(root) {
@@ -30,7 +38,7 @@ function isLinked(root) {
 }
 
 // lead = main thread of the main checkout; everything else (subagents, worker worktrees) is a worker
-const isLead = (ev, root) => !ev.agent_id && !isLinked(root);
+const isLead = (ev, root) => !ev.agent && !isLinked(root);
 
 // <git-common-dir>, absolute. Pure fs for the usual layouts, git only as a fallback.
 function gitCommonDir(root) {
@@ -102,17 +110,20 @@ function ownedMatch(glob, rel) {
   return new RegExp(re, process.platform === "win32" ? "i" : "").test(rel);
 }
 
-// why an edit of target breaks <wt>/.claude/hive-owned, or "" when allowed or there is no list
+// a worktree the lead dispatched a worker into: it lists the ticket's owned paths
+const ownedFile = (wt) => harness().ownedFile(wt);
+
+// why an edit of target breaks the worktree's owned-path list, or "" when allowed or there is no list
 function ownedDenial(wt, target) {
   let list;
-  try { list = fs.readFileSync(path.join(wt, ".claude", "hive-owned"), "utf8"); } catch { return ""; }
+  try { list = fs.readFileSync(ownedFile(wt), "utf8"); } catch { return ""; }
   // path.relative across Windows drives returns an absolute path, not "../"
   const r = path.relative(wt, path.resolve(wt, String(target)));
   const rel = r.split(path.sep).join("/");
   const needs = (why) => `${rel} is ${why}. Comment "NEEDS ${rel}: <why>" on the issue and stop.`;
   if (path.isAbsolute(r) || rel === ".." || rel.startsWith("../")) return needs("outside the worktree");
   const owned = list.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-  return owned.some((g) => ownedMatch(g, rel)) ? "" : needs("not in .claude/hive-owned");
+  return owned.some((g) => ownedMatch(g, rel)) ? "" : needs(`not in ${path.relative(wt, ownedFile(wt)).split(path.sep).join("/")}`);
 }
 
 // last `bytes` of a file as complete lines (first partial line dropped)
@@ -131,68 +142,6 @@ function tailLines(file, bytes = 256 * 1024) {
   } catch { return []; } finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
 }
 
-// newest-first iteration over main-thread transcript entries
-function* entriesBackward(lines, sidechain = false) {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    let e;
-    try { e = JSON.parse(lines[i]); } catch { continue; }
-    if (!e || typeof e !== "object" || (e.isSidechain === true && !sidechain)) continue;
-    yield e;
-  }
-}
-
-const usageSum = (u) => (u && typeof u === "object"
-  ? (+u.input_tokens || 0) + (+u.cache_read_input_tokens || 0) + (+u.cache_creation_input_tokens || 0) : 0);
-
-// context size in tokens: stdin usage if the event carries it, else the newest assistant
-// usage in the transcript; 0 after a compaction boundary with no reply since, or on any doubt
-function contextTokens(ev) {
-  const direct = usageSum(ev.usage);
-  if (direct > 0) return direct;
-  for (const e of entriesBackward(tailLines(ev.transcript_path))) {
-    if (e.subtype === "compact_boundary" || e.isCompactSummary) return 0;
-    const m = e.message;
-    if (!m || (e.type !== "assistant" && m.role !== "assistant")) continue;
-    const n = usageSum(m.usage);
-    if (n > 0) return n;
-  }
-  return 0;
-}
-
-// text of the newest assistant message that has any; a subagent's own transcript
-// (agent_transcript_path, every entry a sidechain) wins over the session's
-function lastAssistantText(ev) {
-  if (typeof ev.last_assistant_message === "string") return ev.last_assistant_message;
-  const own = ev.agent_transcript_path;
-  for (const e of entriesBackward(tailLines(own || ev.transcript_path), !!own)) {
-    const m = e.message;
-    if (!m || (e.type !== "assistant" && m.role !== "assistant")) continue;
-    const c = m.content;
-    const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b && b.type === "text").map((b) => b.text).join("\n") : "";
-    if (text.trim()) return text;
-  }
-  return "";
-}
-
-// newest prompt the human typed, from the transcript tail; null when none is found.
-// Newer transcripts tag it origin.kind "human"; older ones are told apart by their prefix.
-const NOT_HUMAN = /^\s*(<task-notification|<local-command|<cross-session-message|\[Request interrupted|Another Claude session)/;
-function lastHumanPrompt(ev) {
-  // image tool results make lines huge, so look further back and parse only candidate lines
-  const lines = tailLines(ev.transcript_path, 4 * 1024 * 1024)
-    .filter((l) => l.includes("compact_boundary") || (l.includes('"type":"user"') && !l.includes('"toolUseResult"')));
-  for (const e of entriesBackward(lines)) {
-    if (e.subtype === "compact_boundary") return null;
-    if (e.type !== "user" || e.isMeta || e.isCompactSummary || e.toolUseResult !== undefined || !e.message) continue;
-    const c = e.message.content;
-    const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b && b.type === "text").map((b) => b.text).join("\n") : "";
-    if (!text.trim()) continue;
-    if (e.origin ? e.origin.kind !== "human" : NOT_HUMAN.test(text)) continue;
-    return text;
-  }
-  return null;
-}
-
 const execOpts = (cwd, timeout, env) => ({ cwd, encoding: "utf8", timeout, windowsHide: true, stdio: ["ignore", "pipe", "ignore"], env });
 
 // git / gh with a hard timeout; "" on any failure (not installed, no auth, no remote, offline)
@@ -208,76 +157,12 @@ const envInt = (name, dflt) => { const n = parseInt(process.env[name], 10); retu
 // rules for every non-lead agent: nothing that ends a turn waiting for a wake-up that never comes
 const WAIT_MSG = "workers never wait on a background notification (it never arrives after your turn ends). Run it in the foreground with timeout up to 600000 ms, or start it detached (nohup … &) and poll its PID/log in this same turn.";
 const EDIT_LAST_MSG = "--edit-last edits the newest comment of the shared GitHub account, which may be another agent's or the lead's ruling. Post a new comment instead.";
-function workerDenial(tool, ti) {
-  if (tool === "Monitor") return WAIT_MSG;
-  if (tool !== "Bash") return null;
-  if (ti && ti.run_in_background === true) return WAIT_MSG;
-  if (/--edit-last\b/.test(String((ti && ti.command) || ""))) return EDIT_LAST_MSG;
+function workerDenial(ev) {
+  if (ev.tool === "monitor") return WAIT_MSG;
+  if (ev.tool !== "shell") return null;
+  if (ev.background) return WAIT_MSG;
+  if (/--edit-last\b/.test(ev.command)) return EDIT_LAST_MSG;
   return null;
-}
-
-// PreToolUse refusal: exit 2, stderr reaches the agent as the tool's error
-function deny(why) {
-  try { fs.writeSync(2, `hivemind: ${why}\n`); } catch {} // sync: process.exit drops async pipe writes
-  process.exit(2);
-}
-
-function additionalContext(event, text) {
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }) + "\n");
-}
-
-// The lead's hook set in .claude/settings.local.json. Only adds; never removes a user hook.
-const LEAD_GUARD_MATCHER = "Edit|Write|MultiEdit|NotebookEdit|Agent|Task|Bash|Monitor|Read";
-const OLD_GUARD_MATCHERS = ["Edit|Write|MultiEdit|NotebookEdit|Agent|Task", "Edit|Write|MultiEdit|NotebookEdit|Agent|Task|Bash|Monitor"];
-// [event, script, matcher, timeout s]; the autostart may pull and query gh
-const LEAD_HOOKS = [
-  ["SessionStart", "hive-autostart.js", undefined, 60],
-  ["UserPromptSubmit", "hive-journal.js"],
-  ["UserPromptSubmit", "hive-lessons.js"],
-  ["PreToolUse", "hive-lead-guard.js", LEAD_GUARD_MATCHER],
-  ["PreToolUse", "hive-lessons.js", "Bash|Edit|Write|Read"],
-  ["PostToolUse", "hive-lessons.js", "Bash"],
-  ["PreToolUse", "hive-scratch.js", "Bash"],
-  ["PostToolUse", "hive-scratch.js", "Bash"],
-  ["PostToolUseFailure", "hive-scratch.js", "Bash"],
-  ["SubagentStop", "hive-stall.js"],
-  ["TeammateIdle", "hive-stall.js"],
-];
-
-// returns {changed} or {error} (invalid JSON is never overwritten)
-function registerLeadHooks(file) {
-  let raw = null;
-  try { raw = fs.readFileSync(file, "utf8"); } catch {}
-  let s = {};
-  if (raw !== null && raw.trim()) {
-    try { s = JSON.parse(raw); } catch (e) { return { error: `${file} is not valid JSON (${e.message})` }; }
-    if (!s || typeof s !== "object" || Array.isArray(s)) return { error: `${file} is not a JSON object` };
-  }
-  const before = JSON.stringify(s);
-  s.hooks = s.hooks && typeof s.hooks === "object" ? s.hooks : {};
-  const cmd = (f) => `node "$CLAUDE_PROJECT_DIR/.claude/hooks/${f}"`;
-  const names = (entry) => JSON.stringify((entry && entry.hooks) || []);
-  for (const [event, script, matcher, timeout] of LEAD_HOOKS) {
-    const list = (s.hooks[event] = Array.isArray(s.hooks[event]) ? s.hooks[event] : []);
-    const have = list.filter((e) => names(e).includes(script));
-    if (have.length) {
-      for (const e of have) if (script === "hive-lead-guard.js" && OLD_GUARD_MATCHERS.includes(e.matcher)) e.matcher = matcher;
-      continue;
-    }
-    const entry = { hooks: [{ type: "command", command: cmd(script), ...(timeout && { timeout }) }] };
-    if (matcher) entry.matcher = matcher;
-    list.push(entry);
-  }
-  // statusLine commands are not documented to get $CLAUDE_PROJECT_DIR: absolute path, forward
-  // slashes (this file is machine-local). Only when the project sets no statusLine of its own.
-  if (!("statusLine" in s)) {
-    const script = path.resolve(path.dirname(file), "hooks", "hive-statusline.js").split(path.sep).join("/");
-    s.statusLine = { type: "command", command: `node "${script}"` };
-  }
-  if (JSON.stringify(s) === before) return { changed: false };
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(s, null, 2) + "\n");
-  return { changed: true };
 }
 
 // copy src → dst only when the bytes differ; true when written
@@ -312,29 +197,18 @@ function rungOf(ladder, name) {
   return best;
 }
 
-// the session's model: the event's (SessionStart carries it), else the newest main-thread reply's
-function leadModel(ev) {
-  const m = ev && ev.model;
-  const direct = typeof m === "string" ? m : m && typeof m === "object" ? m.id || m.display_name || "" : "";
-  if (direct) return String(direct);
-  for (const e of entriesBackward(tailLines(ev && ev.transcript_path))) {
-    const id = e.message && (e.type === "assistant" || e.message.role === "assistant") && e.message.model;
-    if (typeof id === "string" && id && !id.startsWith("<")) return id;
-  }
-  return "";
-}
-
+// the session's model, as the harness finds it
+const leadModel = (ev) => harness().sessionModel(ev);
 // the model SessionStart reported, kept by the autostart for when the transcript tail has no reply
 const leadFile = (root) => { const c = gitCommonDir(root); return c ? path.join(hiveDir(c), "lead-model.json") : null; };
 function saveLead(ev, root) {
   const f = leadFile(root);
-  const m = leadModel({ model: ev.model });
-  if (f && m && ev.session_id) writeJSON(f, { session: ev.session_id, model: m });
+  if (f && ev.model && ev.session) writeJSON(f, { session: ev.session, model: ev.model });
 }
 function savedLead(ev, root) {
   const f = leadFile(root);
   const saved = f ? readJSON(f, null) : null;
-  return saved && saved.session === ev.session_id && typeof saved.model === "string" ? saved.model : "";
+  return saved && saved.session === ev.session && typeof saved.model === "string" ? saved.model : "";
 }
 
 function modelPolicy(root) {
@@ -383,6 +257,7 @@ function refreshInbox(root, common, timeout = 10000) {
 module.exports = {
   readInbox, refreshInbox, inboxFile,
   run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, hiveDir, readJSON, writeJSON,
-  configFile, hivemindConfig, relPath, gitRoot, runOpen, ownedMatch, ownedDenial, tailLines, contextTokens, lastAssistantText, lastHumanPrompt, envInt, git, gh,
-  workerDenial, deny, additionalContext, rungOf, leadModel, saveLead, modelPolicy, modelCaps, registerLeadHooks, syncFile, LEAD_HOOKS, WAIT_MSG, EDIT_LAST_MSG,
+  configFile, hivemindConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
+  workerDenial, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, WAIT_MSG, EDIT_LAST_MSG,
 };
+try { harness(); } catch {}

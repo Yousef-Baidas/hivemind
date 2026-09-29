@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Claude Code hook: trigger-based recall of <main checkout>/docs/lessons/*.md, so a solved
+// Hook: trigger-based recall of <main checkout>/docs/lessons/*.md, so a solved
 // problem never recurs and no session pays for lessons it does not hit.
 // Lesson frontmatter: trigger (JS regex source, case-insensitive), on (command, output,
 // prompt, path; default all), scope (all | lead | worker; default all).
-// PreToolUse Bash → command; PreToolUse Edit/Write/Read → path; PostToolUse Bash → output;
-// UserPromptSubmit → prompt. A hit injects the lesson as additionalContext, once per session
+// before a shell call → command; before an edit or read → path; after a shell call → output;
+// prompt submit → prompt. A hit injects the lesson as additionalContext, once per session
 // (per subagent) per lesson, at most 2 per event; hits are counted in <common>/hive/lesson-hits.json.
 "use strict";
 const fs = require("fs");
@@ -18,18 +18,15 @@ const OUTPUT_CAP = 20 * 1024;
 
 if (process.env.HIVEMIND === "0") process.exit(0);
 
-lib.run((ev) => {
-  const event = ev.hook_event_name;
-  const tool = ev.tool_name || "";
-  const ti = ev.tool_input || {};
+lib.run((ev, ad) => {
   const root = lib.projectRoot(ev);
   let kind, text;
-  if (event === "UserPromptSubmit") [kind, text] = ["prompt", ev.prompt];
-  else if (event === "PreToolUse" && tool === "Bash") [kind, text] = ["command", ti.command];
-  else if (event === "PreToolUse" && /^(Edit|Write|MultiEdit|Read|NotebookEdit)$/.test(tool)) {
-    const t = ti.file_path || ti.notebook_path;
+  if (ev.kind === "prompt") [kind, text] = ["prompt", ev.prompt];
+  else if (ev.kind === "pre-tool" && ev.tool === "shell") [kind, text] = ["command", ev.command];
+  else if (ev.kind === "pre-tool" && (ev.tool === "edit" || ev.tool === "read")) {
+    const t = ev.path;
     [kind, text] = ["path", t && (lib.relPath(root, t) || String(t).split(path.sep).join("/"))];
-  } else if (event === "PostToolUse" && tool === "Bash") [kind, text] = ["output", outputText(ev.tool_response)];
+  } else if (ev.kind === "post-tool" && ev.tool === "shell") [kind, text] = ["output", capped(ev.output)];
   else return;
   if (typeof text !== "string" || !text) return;
 
@@ -50,7 +47,7 @@ lib.run((ev) => {
     if (re.test(text)) hits.push(l);
   }
 
-  const seenFile = path.join(hive, "lessons-seen", String(ev.session_id || "none").replace(/[^\w.-]/g, "_") + (ev.agent_id ? "-" + String(ev.agent_id).replace(/[^\w.-]/g, "_") : ""));
+  const seenFile = path.join(hive, "lessons-seen", String(ev.session || "none").replace(/[^\w.-]/g, "_") + (ev.agent ? "-" + String(ev.agent).replace(/[^\w.-]/g, "_") : ""));
   const seen = new Set(read(seenFile).split("\n").filter(Boolean));
   const fresh = hits.filter((l) => !seen.has(l.file)).slice(0, MAX_PER_EVENT);
   if (!fresh.length) return;
@@ -64,7 +61,7 @@ lib.run((ev) => {
   for (const l of fresh) counts[l.file] = { hits: ((counts[l.file] || {}).hits || 0) + 1, last: now };
   lib.writeJSON(countFile, counts);
 
-  lib.additionalContext(event, fresh.map((l) => {
+  ad.context(ev, fresh.map((l) => {
     const body = l.body.length > MAX_CHARS ? l.body.slice(0, MAX_CHARS) + " …" : l.body;
     return `hive lesson docs/lessons/${l.file} (matched this ${kind}):\n${body}`;
   }).join("\n\n"));
@@ -72,9 +69,8 @@ lib.run((ev) => {
 
 function read(f) { try { return fs.readFileSync(f, "utf8"); } catch { return ""; } }
 
-// stdout + stderr of a Bash result, head and tail kept when over the cap
-function outputText(r) {
-  const s = typeof r === "string" ? r : r && typeof r === "object" ? [r.stdout, r.stderr].filter((x) => typeof x === "string").join("\n") : "";
+// a shell call's output, head and tail kept when over the cap
+function capped(s) {
   return s.length > OUTPUT_CAP ? s.slice(0, OUTPUT_CAP / 2) + "\n" + s.slice(-OUTPUT_CAP / 2) : s;
 }
 

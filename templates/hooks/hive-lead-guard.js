@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Claude Code PreToolUse hook for the lead's session (main checkout).
+// PreToolUse hook for the lead's session (main checkout); tools are the hive's (edit, read, shell,
+// monitor, spawn), mapped from the CLI's by the harness adapter.
 // Main thread:
 // 1. The lead writes no code: Edit/Write inside the repo is refused except the docs it owns.
 // 2. The model ladder (hive-lib modelCaps): every Agent call names its model; one above the
@@ -9,7 +10,7 @@
 // 4. `--edit-last` is refused: every agent posts as the same GitHub account.
 // 5. The lead does not Read images (renders cost ~1.5k tokens each) unless the human's
 //    latest prompt names the file.
-// Subagents (agent_id set; they run in the lead's process, so a worktree's own hooks may never load):
+// Subagents (ev.agent set; they run in the lead's process, so a worktree's own hooks may never load):
 //   no background Bash, no Monitor, no --edit-last. An edit inside a checkout with .claude/hive-owned
 //   must be an owned path (same rule as hive-owned-paths.js); an edit in this repo's main checkout
 //   while a hive/* branch exists is refused (except the scout's teams/*/skills.txt). All else passes.
@@ -22,49 +23,47 @@ const lib = require(path.join(__dirname, "hive-lib.js"));
 
 // docs the lead may write: the repo docs, ADRs, lessons, nothing else
 const LEAD_MAY_WRITE = [/^CONTEXT\.md$/, /^CONVENTIONS\.md$/, /^AGENTS\.md$/, /^CLAUDE\.md$/, /^docs\/adr\/[^/]+\.md$/, /^docs\/lessons\/[^/]+\.md$/];
-const EDITS = /^(Edit|Write|MultiEdit|NotebookEdit)$/;
 const IMAGE = /\.(png|jpe?g|webp|gif|bmp|tiff?|exr|hdr)$/i;
-const BYPASS = " HIVEMIND=0 claude opens a session without this guard.";
 
 if (process.env.HIVEMIND === "0") process.exit(0);
 
-lib.run((ev) => {
-  const tool = ev.tool_name || "";
-  const ti = ev.tool_input || {};
-
-  if (ev.agent_id) {
-    const why = lib.workerDenial(tool, ti) || (EDITS.test(tool) && subagentEdit(ev, ti));
-    if (why) lib.deny(why);
+lib.run((ev, ad) => {
+  const BYPASS = ` ${ad.bypass} opens a session without this guard.`;
+  if (ev.agent) {
+    const why = lib.workerDenial(ev) || (ev.tool === "edit" && subagentEdit(ev));
+    if (why) ad.deny(why);
     return;
   }
-  // the lead's own Bash stays cheap: one regex, no fs
-  if (tool === "Bash") {
-    if (/--edit-last\b/.test(String(ti.command || ""))) lib.deny(lib.EDIT_LAST_MSG);
+  // the lead's own shell stays cheap: one regex, no fs
+  if (ev.tool === "shell") {
+    if (/--edit-last\b/.test(ev.command)) ad.deny(lib.EDIT_LAST_MSG);
     return;
   }
-  if (tool === "Monitor") return;
+  if (ev.tool === "monitor") return;
 
   const root = lib.projectRoot(ev);
   if (lib.isLinked(root)) return;
 
-  if (tool === "Agent" || tool === "Task") {
-    const why = modelDenial(lib.modelCaps(ev, root), ti.model);
-    if (why) lib.deny(why + BYPASS);
-    const ctx = lib.contextTokens(ev);
-    if (ctx >= lib.envInt("HIVE_HANDOFF_HARD", 180000)) lib.deny(`context at ${Math.round(ctx / 1000)}k: /handoff before dispatching more.`);
+  if (ev.tool === "spawn") {
+    const why = modelDenial(lib.modelCaps(ev, root), ev.spawnModel);
+    if (why) ad.deny(why + BYPASS);
+    const ctx = ad.contextTokens(ev);
+    if (ctx >= lib.envInt("HIVE_HANDOFF_HARD", 180000)) ad.deny(`context at ${Math.round(ctx / 1000)}k: /handoff before dispatching more.`);
     return;
   }
 
-  const target = ti.file_path || ti.notebook_path;
+  const target = ev.path;
   if (!target) return;
-  if (tool === "Read") {
-    if (IMAGE.test(target) && !humanNamed(ev, target)) denyImage(target);
+  if (ev.tool === "read") {
+    if (IMAGE.test(target) && !humanNamed(ev, ad, target))
+      ad.deny(`hivemind: the lead does not open images (each costs ~1.5k tokens of lead context). Spawn a subagent on the ladder's mid model: "Read ${target}; answer in 5 lines: <what to check>", or post the path on the review issue for the human. ${ad.bypass} skips this guard.`, { json: true });
     return; // lib.run exits 0 once stdout drains
   }
+  if (ev.tool !== "edit") return;
   const rel = lib.relPath(root, target);
   if (!rel) return; // outside the repo: temp issue bodies, memory
   if (LEAD_MAY_WRITE.some((re) => re.test(rel))) return;
-  lib.deny(`the lead does not edit ${rel}. Decide the fix, then dispatch it to a hive-<profile>-worker (model per the ladder).` + BYPASS);
+  ad.deny(`the lead does not edit ${rel}. Decide the fix, then dispatch it to a hive-<profile>-worker (model per the ladder).` + BYPASS);
 });
 
 // the ladder: every spawn names its model, never above the lead's rung, never a solo model, never under the floor
@@ -80,32 +79,27 @@ function modelDenial(c, name) {
 }
 
 // the escape hatch: the human's latest prompt names the file; any doubt denies
-function humanNamed(ev, target) {
+function humanNamed(ev, ad, target) {
   try {
-    const prompt = lib.lastHumanPrompt(ev);
+    const prompt = ad.lastHumanPrompt(ev);
     return !!prompt && prompt.includes(path.basename(String(target).replace(/\\/g, "/")));
   } catch { return false; }
 }
 
-function denyImage(target) {
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
-    permissionDecisionReason: `hivemind: the lead does not open images (each costs ~1.5k tokens of lead context). Spawn a subagent on the ladder's mid model: "Read ${target}; answer in 5 lines: <what to check>", or post the path on the review issue for the human. HIVEMIND=0 claude skips this guard.` } }));
-}
-
 // a subagent's edit: owned paths in any checkout that lists them; the main checkout is off limits during a run
-function subagentEdit(ev, ti) {
-  const target = ti.file_path || ti.notebook_path;
+function subagentEdit(ev) {
+  const target = ev.path;
   if (!target) return "";
   const cwd = path.resolve(ev.cwd || lib.projectRoot(ev));
   const abs = path.resolve(cwd, String(target));
   const wt = lib.gitRoot(path.dirname(abs));
   if (!wt) return "";
-  if (fs.existsSync(path.join(wt, ".claude", "hive-owned"))) return lib.ownedDenial(wt, abs);
+  if (fs.existsSync(lib.ownedFile(wt))) return lib.ownedDenial(wt, abs);
   if (lib.isLinked(wt)) return "";
   const common = lib.gitCommonDir(wt);
   if (!common || common !== lib.gitCommonDir(path.resolve(lib.projectRoot(ev))) || !lib.runOpen(common)) return "";
   const rel = lib.relPath(wt, abs);
-  if (ev.agent_type === "hive-scout" && /^teams\/[^/]+\/skills\.txt$/.test(rel)) return "";
+  if (ev.agentType === "hive-scout" && /^teams\/[^/]+\/skills\.txt$/.test(rel)) return "";
   const own = lib.gitRoot(cwd);
   const hint = own && own !== wt && lib.isLinked(own) && lib.gitCommonDir(own) === common
     ? `yours is ${own}: edit ${path.join(own, rel)}`

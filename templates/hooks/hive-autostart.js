@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Claude Code SessionStart hook: start every session in a hivemind repo as the lead,
+// SessionStart hook: start every session in a hivemind repo as the lead,
 // as if the human had typed /hivemind. Prints the skill body plus a local state line
 // so the lead knows what bootstrap can skip without spending a tool call.
-// Also: syncs agents and hooks from the hivemind checkout named in ~/.claude/hivemind.json,
+// Also: syncs agents and hooks from the hivemind checkout named in hivemind.json (lib.configFile),
 // checks it for updates (background fetch at most daily, fast-forward to it when autoUpdate; the
 // behind-count feeds the status line), offers the tour while it is pending (tour=…), and after
 // a compaction (or a startup with an open run) re-injects the run-log tail and, after a
@@ -13,19 +13,17 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
 const { execFileSync, spawn } = require("child_process");
 const lib = require(path.join(__dirname, "hive-lib.js"));
 
 if (process.env.HIVEMIND === "0") process.exit(0);
 
-lib.run((ev) => {
-  if (ev.agent_id) return;
+lib.run((ev, ad) => {
+  if (ev.agent) return;
   const root = path.resolve(lib.projectRoot(ev));
   if (lib.isLinked(root)) return;
 
-  const skillDir = [path.join(root, ".claude", "skills", "hivemind"), path.join(os.homedir(), ".claude", "skills", "hivemind")]
-    .find((d) => fs.existsSync(path.join(d, "SKILL.md")));
+  const skillDir = ad.skillDirs(root).find((d) => fs.existsSync(path.join(d, "SKILL.md")));
   if (!skillDir) return;
 
   const notes = [];
@@ -34,18 +32,18 @@ lib.run((ev) => {
   let behind = 0;
   if (home) {
     behind = safe(() => update(home, cfg, notes), 0);
-    safe(() => sync(home, root, notes));
+    safe(() => sync(ad, home, root, notes));
   }
   const runs = hiveBranches(root);
   const src = ev.source;
   const tour = home && (src === "startup" || src === "clear") ? safe(() => tourState(home, cfg), "") : "";
-  const state = localState(root, runs, home, behind) + " " + safe(() => inboxState(root), "inbox=unknown") + " " + safe(() => models(ev, root), "models=unknown");
+  const state = localState(ad, root, runs, home, behind) + " " + safe(() => inboxState(root), "inbox=unknown") + " " + safe(() => models(ev, root), "models=unknown");
   if (tour) notes.push(tourOffer(tour));
   safe(() => scratchSweep(root));
 
   if (src === "resume" || src === "fork") {
     // a resumed session still has the skill in its transcript; only the state line is new
-    process.stdout.write([`hivemind: session resumed, you are still the lead. ${state}`, ...notes].join("\n") + "\n");
+    ad.context(ev, [`hivemind: session resumed, you are still the lead. ${state}`, ...notes].join("\n"), "session-start");
     return;
   }
   const extra = [];
@@ -53,7 +51,8 @@ lib.run((ev) => {
   if (src === "compact") extra.push(safe(() => humanSaid(root), ""));
 
   const body = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
-  process.stdout.write(
+  ad.context(
+    ev,
     [
       "hivemind autostart: this repo runs on hivemind. The skill below is loaded exactly as if the human had typed /hivemind; do not wait for the command.",
       "The human's first message is the work order (or a question about the run). Void only if that message is /hivemind-review, another slash command, or says \"no hivemind\".",
@@ -66,7 +65,8 @@ lib.run((ev) => {
       ...extra.filter(Boolean),
       "",
       body,
-    ].join("\n")
+    ].join("\n"),
+    "session-start"
   );
 });
 
@@ -139,21 +139,20 @@ function tourState(home, cfg) {
   return field;
 }
 
-// agents → ~/.claude/agents, hooks → <repo>/.claude/hooks, only when bytes differ; never deletes
-function sync(home, root, notes) {
+// agents and hooks to where the harness keeps them, only when bytes differ; never deletes
+function sync(ad, home, root, notes) {
   let n = 0;
   let hooks = 0;
   const ls = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
-  const agentsDir = path.join(os.homedir(), ".claude", "agents");
-  for (const f of ls(path.join(home, "agents"))) if (f.endsWith(".md") && lib.syncFile(path.join(home, "agents", f), path.join(agentsDir, f))) n++;
+  for (const f of ls(path.join(home, "agents"))) if (f.endsWith(".md") && lib.syncFile(path.join(home, "agents", f), path.join(ad.agentsDir, f))) n++;
   const hooksSrc = path.join(home, "templates", "hooks");
   for (const f of ls(hooksSrc)) {
     if (f === "install-lead-hooks.js") continue; // the installer runs from the source, like install-lead-hooks does
     const s = path.join(hooksSrc, f);
-    if (fs.statSync(s).isFile() && lib.syncFile(s, path.join(root, ".claude", "hooks", f))) hooks++;
+    if (fs.statSync(s).isFile() && lib.syncFile(s, path.join(ad.hooksDir(root), f))) hooks++;
   }
   // a new hook file may need a new registration
-  if (hooks) lib.registerLeadHooks(path.join(root, ".claude", "settings.local.json"));
+  if (hooks) ad.registerLead(root);
   if (n + hooks) notes.push(`hivemind: synced ${n + hooks} files from ${home}`);
 }
 
@@ -216,16 +215,7 @@ function models(ev, root) {
   return `models=lead:${lead},top:${c.top},mid:${c.mid}`;
 }
 
-// the required context-mode plugin: installed and enabled at user scope (two small file reads)
-function contextModeOn() {
-  const id = "context-mode@context-mode";
-  const dir = path.join(os.homedir(), ".claude");
-  const inst = lib.readJSON(path.join(dir, "plugins", "installed_plugins.json"), {}) || {};
-  const s = lib.readJSON(path.join(dir, "settings.json"), {}) || {};
-  return !!(inst.plugins && Array.isArray(inst.plugins[id]) && inst.plugins[id].length && s.enabledPlugins && s.enabledPlugins[id] === true);
-}
-
-function localState(root, runs, home, behind) {
+function localState(ad, root, runs, home, behind) {
   const has = (f) => fs.existsSync(path.join(root, f));
   const read = (f) => { try { return fs.readFileSync(path.join(root, f), "utf8"); } catch { return ""; } };
   const ls = (d) => { try { return fs.readdirSync(path.join(root, d)); } catch { return []; } };
@@ -260,7 +250,7 @@ function localState(root, runs, home, behind) {
       `doc-bloat=${bloat.join(",") || "none"}`,
       `lessons=${lessons}`,
       ...(scratch > 1024 ? [`scratch=${scratch}MB`] : []),
-      ...(contextModeOn() ? [] : ["context-mode=missing"]),
+      ...(ad.contextModeOn() ? [] : ["context-mode=missing"]),
       `hivemind-src=${home || "none"}`,
       ...(behind ? [`hivemind-update=${behind}-behind (node ${path.join(home, "install.js")} --update)`] : []),
     ].join(" ")

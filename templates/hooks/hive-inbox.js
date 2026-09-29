@@ -13,7 +13,7 @@ try {
   const args = process.argv.slice(2);
   // run from anywhere: the repo is the one this script is installed in, else the cwd
   const here = path.resolve(__dirname, "..", "..");
-  const root = lib.gitCommonDir(here) ? here : path.resolve(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+  const root = lib.gitCommonDir(here) ? here : path.resolve(lib.projectRoot());
   const common = lib.gitCommonDir(root);
   if (!common) return;
   const inbox = (args.includes("--refresh") && lib.refreshInbox(root, common)) || lib.readInbox(common);

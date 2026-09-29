@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code Stop / SubagentStop / TeammateIdle hook: an agent that ends its turn "waiting on"
+// Stop / SubagentStop / TeammateIdle hook: an agent that ends its turn "waiting on"
 // a background job never wakes (the notification cannot arrive after the turn ends), so the
 // stop is blocked once with an order to poll in the foreground.
 // Lead's session: SubagentStop + TeammateIdle. Worker worktrees: Stop.
@@ -16,26 +16,23 @@ const WAITING_ON = /\b(waiting (on|for) (the |a |my |its |this )?(background|job
 const WAIT_VERB = /\b(wait(ing)?|will (check|report|poll|resume|update|follow up|continue)|i'll (check|report|poll|resume|continue|let you know)|once (it|the [\w-]+|that) (finishes|completes|is done|ends)|when (it|the [\w-]+|that) (finishes|completes|is done|ends)|notif(y|ied|ication)|monitor(ing)?|check back)\b/i;
 const BACKGROUND = /\b(background(ed)?|job|render(ing)?|process|build|task|pid|nohup|in progress|running)\b/i;
 
-lib.run((ev) => {
-  if (ev.stop_hook_active === true) return;
-  const text = String(lib.lastAssistantText(ev) || "");
+lib.run((ev, ad) => {
+  if (ev.stopActive) return;
+  const text = String(ad.lastAssistantText(ev) || "");
   if (!text.trim() || FINAL.test(text)) return;
   const end = text.slice(-800); // the waiting sentence sits at the end of the message
-  // background_tasks (Stop/SubagentStop) lists in-flight work only
-  const running = Array.isArray(ev.background_tasks) && ev.background_tasks.length > 0;
-  const waiting = WAITING_ON.test(end) || (WAIT_VERB.test(end) && (BACKGROUND.test(end) || running));
+  const waiting = WAITING_ON.test(end) || (WAIT_VERB.test(end) && (BACKGROUND.test(end) || ev.busy));
   if (!waiting || seenBefore(ev, text)) return;
 
-  if (ev.hook_event_name === "TeammateIdle") lib.deny(REASON); // exit 2 keeps the teammate working
-  process.stdout.write(JSON.stringify({ decision: "block", reason: REASON }) + "\n");
+  ad.keepGoing(ev, REASON);
 });
 
-// one block per distinct message: TeammateIdle has no stop_hook_active
+// one block per distinct message: an idle teammate has no stopActive
 function seenBefore(ev, text) {
   const common = lib.gitCommonDir(lib.projectRoot(ev));
   if (!common) return false;
   const file = path.join(lib.hiveDir(common), "stall-blocked.json");
-  const key = crypto.createHash("sha1").update(`${ev.agent_id || ev.teammate_name || ev.session_id || ""}\n${text}`).digest("hex");
+  const key = crypto.createHash("sha1").update(`${ev.agent || ev.teammate || ev.session}\n${text}`).digest("hex");
   const seen = lib.readJSON(file, []);
   const list = Array.isArray(seen) ? seen : [];
   if (list.includes(key)) return true;

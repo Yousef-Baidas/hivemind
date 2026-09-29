@@ -8,7 +8,7 @@
 const path = require("path");
 const lib = require(path.join(__dirname, "hive-lib.js"));
 
-const root = path.resolve(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+const root = path.resolve(lib.projectRoot());
 const NOT_TICKET = new Set(["hive-review", "hive-log", "hive-debt"]);
 
 const branches = lib.git(["-C", root, "branch", "--list", "hive/*", "--format=%(refname:short)"], root).split("\n").filter(Boolean);

@@ -7,7 +7,7 @@
 //   node .claude/hooks/hive-scratch.js --sweep --stale    the autostart's: done and idle 72h, or idle 7 days regardless
 //   node .claude/hooks/hive-scratch.js --size             MB held in scratch dirs and ledgered strays
 // <key> is a ticket's <run>-<id> (its branch hive/<run>-<id>) or a run's <run>.
-// As a hook (lead's session, PreToolUse + PostToolUse + PostToolUseFailure on Bash): PreToolUse snapshots the
+// As a hook (lead's session, before and after every shell call, failed or not): the first snapshots the
 // top-level names of os.tmpdir(); after the call a new name owned by this user and named in the command or its
 // output is a stray, appended to <common>/hive/scratch-ledger.jsonl with its key (the agent's own --path,
 // the hive/* branch of its cwd, or the one open run). Deletion happens only in --sweep, only for ledgered
@@ -31,31 +31,31 @@ if (argv.length) cli(argv);
 else if (process.env.HIVEMIND !== "0") lib.run(hook);
 
 function hook(ev) {
-  if (ev.tool_name !== "Bash") return;
+  if (ev.tool !== "shell") return;
   const common = lib.gitCommonDir(lib.projectRoot(ev));
   if (!common) return;
   const hive = lib.hiveDir(common);
-  const id = String(ev.tool_use_id || `${ev.session_id}-${ev.agent_id || "lead"}`).replace(/[^\w.-]/g, "_");
+  const id = String(ev.toolUseId || `${ev.session}-${ev.agent || "lead"}`).replace(/[^\w.-]/g, "_");
   const snap = path.join(hive, "scratch-snap", id);
   const tmp = os.tmpdir();
-  if (ev.hook_event_name === "PreToolUse") {
+  if (ev.kind === "pre-tool") {
     const names = fs.readdirSync(tmp);
     fs.mkdirSync(path.dirname(snap), { recursive: true });
     fs.writeFileSync(snap, JSON.stringify({ tmp, names }));
     return;
   }
-  if (!/^PostToolUse(Failure)?$/.test(ev.hook_event_name)) return;
+  if (ev.kind !== "post-tool" && ev.kind !== "tool-failed") return;
   const before = lib.readJSON(snap, null);
   try { fs.unlinkSync(snap); } catch {}
-  const cmd = String((ev.tool_input && ev.tool_input.command) || "");
-  const who = ev.agent_id ? `${ev.agent_type || "agent"}:${ev.agent_id}` : "lead";
+  const cmd = ev.command;
+  const who = ev.agent ? `${ev.agentType || "agent"}:${ev.agent}` : "lead";
   const file = ledgerFile(common);
   const rows = [];
   const m = PATH_CMD.exec(cmd);
   if (m && KEY.test(m[1])) rows.push({ bind: who, key: m[1], at: Date.now() });
   if (before && before.tmp === tmp && Array.isArray(before.names)) {
     const had = new Set(before.names);
-    const text = `${cmd}\n${outputText(ev)}`;
+    const text = `${cmd}\n${ev.error ? `${ev.output}\n${ev.error}` : ev.output}`;
     const fresh = fs.readdirSync(tmp).filter((n) => !had.has(n) && named(text, n));
     if (fresh.length) {
       const old = readLedger(file).rows;
@@ -243,12 +243,6 @@ function gitdirOf(p) {
 function named(text, name) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(^|[^\\w.-])${esc}($|[^\\w.-])`).test(text);
-}
-
-function outputText(ev) {
-  const r = ev.tool_response;
-  const s = typeof r === "string" ? r : r && typeof r === "object" ? [r.stdout, r.stderr].filter((x) => typeof x === "string").join("\n") : "";
-  return typeof ev.error === "string" ? `${s}\n${ev.error}` : s;
 }
 
 // bytes in scratch dirs and in the ledgered strays still present; cached for the autostart's state line

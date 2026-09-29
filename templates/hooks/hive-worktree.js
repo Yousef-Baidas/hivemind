@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 // Prepare a worker's worktree before dispatch (replaces the manual mkdir/cp/printf):
 //   node .claude/hooks/hive-worktree.js <worktree> <owned path or glob>...
-// Copies the worker hooks into <wt>/.claude/hooks/, writes <wt>/.claude/settings.local.json
-// from worktree-settings.local.json and <wt>/.claude/hive-owned (one entry per line), and keeps
-// those local files out of `git add` via <git-common-dir>/info/exclude.
+// The harness adapter copies the worker hooks in and registers them (Claude Code: .claude/hooks/ and
+// .claude/settings.local.json from worktree-settings.local.json); this writes the owned-path list
+// (one entry per line) and keeps those local files out of `git add` via <git-common-dir>/info/exclude.
 "use strict";
 const fs = require("fs");
 const path = require("path");
 const lib = require(path.join(__dirname, "hive-lib.js"));
-
-const HOOKS = ["hive-lib.js", "hive-owned-paths.js", "hive-worker-guard.js", "hive-stall.js", "hive-lessons.js", "hive-scratch.js"];
-const EXCLUDE = ["/.claude/hive-owned", "/.claude/settings.local.json", "/.claude/hooks/hive-*.js"];
+const ad = require(path.join(__dirname, "hive-harness.js"));
 
 const [wtArg, ...owned] = process.argv.slice(2);
 if (!wtArg || !owned.length) {
@@ -25,12 +23,10 @@ if (!fs.existsSync(path.join(wt, ".git"))) {
   return;
 }
 
-const hooksDir = path.join(wt, ".claude", "hooks");
-fs.mkdirSync(hooksDir, { recursive: true });
-for (const f of HOOKS) fs.copyFileSync(path.join(__dirname, f), path.join(hooksDir, f));
-fs.copyFileSync(path.join(__dirname, "worktree-settings.local.json"), path.join(wt, ".claude", "settings.local.json"));
+const EXCLUDE = ad.prepareWorker(wt, __dirname);
 const entries = owned.map((p) => p.replace(/\\/g, "/").replace(/^\.\//, "")).filter(Boolean);
-fs.writeFileSync(path.join(wt, ".claude", "hive-owned"), entries.join("\n") + "\n");
+fs.mkdirSync(path.dirname(lib.ownedFile(wt)), { recursive: true });
+fs.writeFileSync(lib.ownedFile(wt), entries.join("\n") + "\n");
 
 try {
   const common = lib.gitCommonDir(wt);

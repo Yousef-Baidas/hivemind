@@ -85,4 +85,6 @@ Lead (main checkout):
 
 Worker worktree (written by `hive-worktree.js`, a backup for sessions opened inside a worktree): `hive-owned-paths.js` (§2), `hive-worker-guard.js` (no `run_in_background`, no `Monitor`, no `--edit-last`), `hive-lessons.js`, `hive-scratch.js`, `hive-stall.js` on `Stop`.
 
+No hook reads Claude Code's hook JSON itself. `hive-harness.js` loads the adapter named by `HIVE_HARNESS` (`hive-harness-<name>.js`, default and fallback `claude`), which turns the CLI's input into one hive event, answers for the hook (deny, add context, keep going), reads the transcript, and knows where the CLI keeps settings, agents and worker hooks. `hive-lib.js` is the part every CLI shares. The event and adapter contract are documented at the top of `hive-harness.js`.
+
 `HIVEMIND=0 claude` opens a plain session with none of the lead's hooks: the review session, or the human working by hand. Hook state lives in `<git-common-dir>/hive/` (`journal.jsonl`, `inbox.json`, `lesson-hits.json`, `lead-model.json`, `scratch-ledger.jsonl`, `scratch/`, `scratch-size.json`, lesson and stall caches) and is never committed. `node <hivemind checkout>/install.js --doctor` checks the whole install, `--doctor --fix` repairs what it safely can.

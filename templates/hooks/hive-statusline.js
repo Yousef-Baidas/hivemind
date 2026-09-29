@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code statusLine command: the user's own status line (from ~/.claude/settings.json,
+// Claude Code statusLine command: the user's own status line (from <harness home>/settings.json,
 // run with the same stdin), then " · hive: N questions · M reviews" when either is above 0, and
 // " · hivemind: update ready" when the autostart found the hivemind checkout behind.
 // Reads only the inbox cache; a cache older than 60 s triggers one detached
@@ -14,8 +14,11 @@ let out = "";
 let input = "";
 try { input = fs.readFileSync(0, "utf8"); } catch {}
 
+let lib = null, ad = null;
+try { lib = require(path.join(__dirname, "hive-lib.js")); ad = require(path.join(__dirname, "hive-harness.js")); } catch {}
+
 try {
-  const user = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8")).statusLine;
+  const user = JSON.parse(fs.readFileSync(path.join(ad ? ad.home : path.join(os.homedir(), ".claude"), "settings.json"), "utf8")).statusLine;
   const cmd = user && user.type === "command" && typeof user.command === "string" ? user.command : "";
   if (cmd && !cmd.includes("hive-statusline.js")) {
     // a statusLine command is a shell string by definition, so it runs through the shell
@@ -24,7 +27,6 @@ try {
 } catch {}
 
 try {
-  const lib = require(path.join(__dirname, "hive-lib.js"));
   let ev = {};
   try { ev = JSON.parse(input) || {}; } catch {}
   const here = path.resolve(__dirname, "..", "..");
@@ -44,7 +46,7 @@ try {
 
 // the hivemind checkout is behind its upstream (counted by the autostart); shown until --update
 try {
-  const b = (JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "hivemind.json"), "utf8")) || {}).behind;
+  const b = (JSON.parse(fs.readFileSync(lib.configFile(), "utf8")) || {}).behind;
   if (b > 0) out += `${out ? " · " : ""}hivemind: update ready (install.js --update)`;
 } catch {}
 
