@@ -1116,13 +1116,13 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   const one = ["backend", "sql-optimization"];
   ok("installer-fixes (a): the links resolve into the fake global skills dir, nothing fetched", (() => { try { return fs.lstatSync(tl(...one)).isSymbolicLink() && fs.realpathSync(tl(...one)) === fs.realpathSync(path.join(IH, ".claude", "skills", one[1])); } catch { return false; } })() &&
     !clog().slice(calls0).some((l) => /skills add|npx/.test(l)), tl(...one));
-  // a skill missing globally stays a FIX row that names --project --install
+  // a skill missing globally stays a FIX row; doctor --fix fetches nothing
   const FB = repoAt("instfix-a2"), IH2 = chome("instfix2"), hole = "sql-optimization";
   run(INST, "", { args: ["--project"], cwd: FB, env: cenv(IH2) });
   for (const n of names.filter((x) => x !== hole)) gskill(IH2, n);
   d = run(INST, "", { args: ["--doctor", "--fix"], cwd: FB, env: cenv(IH2) }).out;
-  ok("installer-fixes (a): a skill missing globally stays a FIX row naming --project --install, the rest linked",
-    /^FIX  team skills not linked \(backend 1\)/m.test(d) && /--project --install/.test(row(d, /^FIX  team skills/)) && !fs.existsSync(path.join(FB, "teams", "backend", ".claude", "skills", hole)) &&
+  ok("installer-fixes (a): a missing skill stays a FIX row whose remedy contains link-skills.js and --install, the rest linked",
+    /^FIX  team skills not linked \(backend 1\)/m.test(d) && /link-skills\.js.*--install/.test(row(d, /^FIX  team skills/)) && !fs.existsSync(path.join(FB, "teams", "backend", ".claude", "skills", hole)) &&
     fs.existsSync(path.join(FB, "teams", "backend", ".claude", "skills", "sql-code-review")), row(d, /team skills/));
 
   // (b) copyTeams: a repo with its own routing gets no shipped profile folder back; a fresh one gets them all
