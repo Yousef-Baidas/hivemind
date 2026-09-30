@@ -491,9 +491,12 @@ function copyTeams(root) {
     log("removed  teams/templates/hooks/settings.local.json (renamed to worktree-settings.local.json)");
   }
   // the routing table is the repo's once copied, like PROFILE.md
-  if (!lstat(path.join(teams, "ROUTING.md"))) fs.copyFileSync(path.join(SHIPPED_TEAMS, "ROUTING.md"), path.join(teams, "ROUTING.md"));
+  // a repo with its own roster keeps it: profile folders are seeded only when there was no ROUTING.md
+  const hadRoster = !!lstat(path.join(teams, "ROUTING.md"));
+  if (!hadRoster) fs.copyFileSync(path.join(SHIPPED_TEAMS, "ROUTING.md"), path.join(teams, "ROUTING.md"));
   for (const p of L.profiles(SHIPPED_TEAMS)) {
     const src = path.join(SHIPPED_TEAMS, p), dest = path.join(teams, p);
+    if (hadRoster && !isDir(dest)) continue;
     fs.mkdirSync(dest, { recursive: true });
     for (const f of ["PROFILE.md", "skills.txt"]) {
       if (isFile(path.join(src, f)) && !lstat(path.join(dest, f))) fs.copyFileSync(path.join(src, f), path.join(dest, f));

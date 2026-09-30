@@ -11,7 +11,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { tailLines, legacyWorktreeDir, legacyWorktrees } = require(path.join(__dirname, "proteus-lib.js"));
+const { tailLines, samePath, legacyWorktreeDir, legacyWorktrees } = require(path.join(__dirname, "proteus-lib.js"));
 const claude = require(path.join(__dirname, "proteus-harness-claude.js"));
 
 const name = "codex";
@@ -347,12 +347,12 @@ function sandboxRoots(root, write = true) {
   }
   if (text[i] !== "]") return refuse("has an unterminated writable_roots array");
   const old = legacyWorktreeDir(abs);
-  const isOld = (x) => path.resolve(x.v) === old;
+  const isOld = (x) => samePath(x.v, old);
   const live = vals.some(isOld) ? legacyWorktrees(abs) : [];
   const legacy = live.length ? { dir: old, worktrees: live } : null;
   const drop = live.length ? [] : vals.filter(isOld);
   const stale = drop.length ? old : null;
-  const has = vals.some((x) => path.resolve(x.v) === dir);
+  const has = vals.some((x) => samePath(x.v, dir));
   if (has && !stale) {
     if (write) fs.mkdirSync(dir, { recursive: true });
     return { file, dir, created: false, changed: false, legacy };
