@@ -15,7 +15,7 @@ Windows specifics for a Node CLI that installs files, links folders and spawns t
 - Drive-letter case differs between sources (`C:\` and `c:\`). Normalise before `startsWith` checks.
 - 8.3 short names (`PROGRA~1`, `RUNNER~1`) can name the same folder as the long path. Call `fs.realpathSync.native` before comparing.
 - Reserved names (`CON`, `NUL`, `COM1`) and trailing dots or spaces are invalid; reject them in any name taken from input.
-- Keep paths under 260 characters or use the `\\?\` prefix; `path.join` does not add it.
+- Keep paths short for the tools a CLI spawns (git, PowerShell, cmd): the 260-character limit bites them. Node's `fs` adds the `\\?\` namespace to absolute paths itself on win32.
 
 ## Environment
 

@@ -16,6 +16,7 @@ Rules:
 6. No `pull_request_target` on a workflow that checks out PR code (pwn-request).
 7. `devDependencies` holds only oxlint and `@oxlint/plugins`.
 8. Secrets come from the environment, never the repo. Never touch deploy targets or credentials; comment `NEEDS <target>: <command>` on the issue and stop.
+9. A lint rule that contradicts `CONVENTIONS.md` is switched off in the config with the convention quoted beside it, never worked around in code.
 
 Sources, by name: GitHub Docs "Security hardening for GitHub Actions" and the workflow syntax reference; the `actions/runner-images` Windows readme; OpenSSF Scorecard checks Pinned-Dependencies and Token-Permissions; the oxlint docs.
 

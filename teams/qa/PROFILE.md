@@ -8,7 +8,15 @@ Runs once per wave on `proteus/<run>`, not per ticket. Per-ticket gates already 
 
 Do: full suite, e2e suite if present, smoke command from a fresh install dir, and a clean rebuild of every non-code deliverable from the branch alone (render, export, compile, recompute) matching the merged evidence. Compress output with rtk. Map each test to a ticket id; a ticket with no coverage is a finding even when green.
 
-Repo checks, added:
+The lead names the mode: `wave` is the paragraph above, nothing more. `milestone` and `close` add the steps below and run on the lead's `top` model.
+
+Milestone, step 1: mutation testing on files changed since the milestone's merge-base. Stryker (`npx stryker run --mutate <files>`), `mutmut run --paths-to-mutate <files>`, or `cargo mutants --file <f>`. A surviving mutant in a changed file is a finding: `MUTANT <file:line> survives`. Tool missing → say so once, continue without.
+
+Milestone, step 2: deep quality review. Read `teams/qa/.claude/skills/thermo-nuclear-code-quality-review/SKILL.md` (it cannot be invoked, only read) and apply it to `git diff <merge-base>..proteus/<run>`, opening surrounding files only where the skill needs them to judge. `CONVENTIONS.md` beats the skill where they disagree. Findings the skill ranks as blockers → numbered `WAVE-RED` items, `QUALITY <file:line> <problem> → <what green looks like>`, mapped to the ticket that introduced them. Everything below blocker → one comment each on the milestone's debt issue (`Debt: <run>/<milestone>`, named by the lead), never a ticket, never a fix. Skill file missing → `WAVE-RED: required skill not linked`; the lead stops and tells the human.
+
+Close: full suite; `fallow health` (JS/TS) or `vulture` (Python) on the branch; then the scan phase only of `improve-codebase-architecture` (read `SKILL.md` under `~/.claude/plugins/cache/*/mattpocock-skills/*/skills/engineering/improve-codebase-architecture/`; no HTML report, no grilling): at most five deepening candidates, one line each with `file:line` and the seam, as one comment on the last milestone's debt issue. The human picks; a picked candidate is a future run's ticket.
+
+Repo checks, added, in every mode:
 - Tests are hermetic: temp `HOME` and `CODEX_HOME`, fake gh and claude, `mkdtemp`, no fixed shared workdir.
 - A test fails when its fix is reverted.
 - win32 paths are exercised.
@@ -16,10 +24,4 @@ Repo checks, added:
 
 Sources, by name: Software Engineering at Google ch. 11-14; the Node `assert` docs; Fowler, "Mocks Aren't Stubs".
 
-The lead names the mode: `wave` is the paragraphs above, nothing more. `milestone` and `close` add these and run on the lead's `top` model.
-
-Milestone: mutation testing on files changed since the merge-base (Stryker, `mutmut` or `cargo mutants`); a surviving mutant is `MUTANT <file:line> survives`. Then read `teams/qa/.claude/skills/thermo-nuclear-code-quality-review/SKILL.md` (read only, it cannot be invoked) and apply it to `git diff <merge-base>..proteus/<run>`; blockers are numbered `WAVE-RED` items `QUALITY <file:line> <problem> → <what green looks like>`, the rest one comment each on the milestone's debt issue. Skill file missing → `WAVE-RED: required skill not linked`.
-
-Close: full suite; `fallow health` on the branch; then the scan phase of `improve-codebase-architecture`, at most five candidates as one comment on the last milestone's debt issue.
-
-Verdict: `WAVE-GREEN` or `WAVE-RED` with numbered failures mapped to ticket ids. Flaky tests go in memory.
+Verdict: `WAVE-GREEN` or `WAVE-RED` with numbered failures mapped to ticket ids. Flaky tests go in memory so the lead can ticket them.
