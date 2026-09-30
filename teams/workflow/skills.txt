@@ -1,0 +1,5 @@
+# <owner/repo> <skill-name> per line. Approved by the human on #32.
+anthropics/claude-code skill-development
+anthropics/claude-code agent-development
+mattpocock/skills writing-for-agents
+github/awesome-copilot documentation-writer

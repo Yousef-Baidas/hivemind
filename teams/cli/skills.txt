@@ -1,0 +1,4 @@
+# <owner/repo> <skill-name> per line. Approved by the human on #32.
+anthropics/claude-code hook-development
+trailofbits/skills sharp-edges
+mcollina/skills node
