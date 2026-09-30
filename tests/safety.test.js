@@ -466,7 +466,7 @@ try {
   ok("workdir() exits non-zero when os.tmpdir() is inside a git worktree", r.status !== 0 && r.status !== null, `${r.status} ${said}`);
   ok("workdir()'s refusal names the misplaced tmpdir", r.status !== 0 && (said.includes(bad) || said.includes(real(bad))), said);
   ok("workdir()'s refusal is a message, not a crash", r.status !== 0 && !/\n\s+at /.test(r.stderr || ""), r.stderr);
-  ok("workdir() creates nothing under the misplaced tmpdir", !lstat(path.join(bad, "proteus-test")));
+  ok("workdir() creates nothing under the misplaced tmpdir", fs.readdirSync(bad).length === 0, fs.readdirSync(bad).join(" "));
 } finally {
   for (const d of made) fs.rmSync(d, { recursive: true, force: true });
 }
