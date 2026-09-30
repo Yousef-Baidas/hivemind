@@ -13,7 +13,7 @@ const { ok, sandbox, summary } = require(path.join(__dirname, "..", "lib.js"));
 const ROOT = path.join(__dirname, "..", "..");
 const FIXTURE = path.join(__dirname, "..", "fixtures", "hive-era");
 const WIN = process.platform === "win32";
-const PS = { "--install": "-Install", "--project": "-Project", "--doctor": "-Doctor", "--fix": "-Fix", "--update": "-Update" };
+const PS = { "--project": "-Project", "--doctor": "-Doctor", "--fix": "-Fix", "--update": "-Update" };
 
 const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8", windowsHide: true, timeout: 30000 }).split("\0").filter(Boolean);
 const sha = crypto.createHash("sha1").update(fs.readFileSync(path.join(ROOT, "install.js"))).digest("hex");
@@ -107,9 +107,9 @@ const walk = (d, rel = "") => fs.readdirSync(path.join(d, rel)).flatMap((n) => {
   };
   const fixRows = (r) => rows(r.out, "FIX").join(" | ") || r.all.slice(-600);
 
-  // 1. fresh install
-  let r = inst(["--install"], s.dir);
-  ok("1 install: --install exits 0", r.code === 0, r.all.slice(-600));
+  // 1. fresh install: the global install takes no flag (--install is a --project sub-flag)
+  let r = inst([], s.dir);
+  ok("1 install: the global install exits 0", r.code === 0, r.all.slice(-600));
   const link = path.join(s.home, ".claude", "skills", "proteus");
   let target = "";
   try { target = fs.realpathSync(link); } catch {}
