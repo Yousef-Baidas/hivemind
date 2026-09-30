@@ -97,6 +97,8 @@ function has(cmd, args = ["--version"]) {
 const norm = (s) => s.replace(/\r\n/g, "\n");
 const readText = (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } };
 const inside = (child, parent) => { const r = path.relative(parent, child); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
+// a repo path as the log shows it on every OS: relative, with /
+const shown = (root, p) => path.relative(root, p).split(path.sep).join("/");
 
 // deletes (#13): every one goes through safeRemove, limited to allowedRoots
 // realpath of the deepest existing ancestor, the rest joined on: a path that does not exist yet resolves too
@@ -437,7 +439,7 @@ function registerHooks(root) {
   withProject(root, () => {
     for (const f of codex() ? cx().skipHooks : []) {
       const p = path.join(cx().hooksDir(root), f), st = lstat(p);
-      if (st && st.isFile() && safeRemove(p, ownedRoots())) log(`removed  ${path.relative(root, p)} (unused by ${HARNESS})`);
+      if (st && st.isFile() && safeRemove(p, ownedRoots())) log(`removed  ${shown(root, p)} (unused by ${HARNESS})`);
     }
   });
   const env = { ...process.env, PROTEUS_HARNESS: HARNESS, PROTEUS_KEEP_SKIPPED: "1" };
@@ -460,7 +462,7 @@ function excludeLocal(root, list = EXCLUDE, what = "settings.local.json, Proteus
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text + add.join("\n") + "\n");
   }
-  log(`exclude  -> ${path.relative(root, file) || file} (${what})`);
+  log(`exclude  -> ${shown(root, file) || file} (${what})`);
 }
 
 // teams/.gitignore is the repo's once copied; a pattern shipped since (a new CLI's skill links)
@@ -514,8 +516,8 @@ function copyTeams(root) {
 
 function projectInstall(root, opt) {
   const { dupes, overrides } = projectDupes(root, true);
-  for (const p of dupes) log(`removed  ${path.relative(root, p)} (duplicate of the global install)`);
-  for (const p of overrides) log(`local override kept: ${path.relative(root, p).split(path.sep).join("/")} (differs from shipped; delete it to use the shipped one)`);
+  for (const p of dupes) log(`removed  ${shown(root, p)} (duplicate of the global install)`);
+  for (const p of overrides) log(`local override kept: ${shown(root, p)} (differs from shipped; delete it to use the shipped one)`);
   copyTeams(root);
   L.run({ root, install: !!opt.install, confine: !!opt.confine, log, remove: guardedRemove });
   // lead autostart + guard: machine-local, never tracked, so worker worktrees do not inherit them
@@ -534,7 +536,7 @@ function projectInstall(root, opt) {
 function sandboxRoots(root) {
   const w = cx().sandboxRoots(root);
   if (w.error) warn(`warning: ${w.error}`);
-  else log(`sandbox  -> ${path.relative(root, w.file)} (${w.changed ? `${w.created ? "created, " : ""}worker worktrees in ${w.dir} writable` : "worktree folder already writable"})`);
+  else log(`sandbox  -> ${shown(root, w.file)} (${w.changed ? `${w.created ? "created, " : ""}worker worktrees in ${w.dir} writable` : "worktree folder already writable"})`);
   if (w.stale) log(`sandbox  -> ${w.stale} dropped from writable_roots (no worktree of a pre-rename run is left in it)`);
   if (w.legacy) log(`sandbox  -> ${w.legacy.dir} kept in writable_roots: a pre-rename run still has worktrees there (${w.legacy.worktrees.join(", ")}); the next --project drops it once they are gone`);
   return w;

@@ -31,7 +31,7 @@ const run = (script, input, opts = {}) => {
 const BARE = path.join(W, "remote.git");
 const HSRC = path.join(W, "proteussrc");
 g(W, "init", "-q", "--bare", "-b", "main", BARE);
-g(W, "clone", "-q", BARE, HSRC);
+g(W, "clone", "-q", "-c", "core.autocrlf=false", BARE, HSRC); // git for windows defaults to CRLF checkouts
 fs.mkdirSync(path.join(HSRC, "agents"));
 fs.writeFileSync(path.join(HSRC, "agents", "proteus-worker.md"), "worker v1\n");
 fs.mkdirSync(path.join(HSRC, "templates"), { recursive: true });
@@ -419,14 +419,17 @@ ok("autostart: lastFetch updated", cfg.lastFetch > Date.now() - 60e3 && cfg.auto
 const TMPD = path.join(W, "tmp"); fs.mkdirSync(TMPD);
 const OUTSIDE = path.join(W, "outside"); fs.mkdirSync(OUTSIDE); fs.writeFileSync(path.join(OUTSIDE, "keep.txt"), "k");
 const SC = hook("proteus-scratch.js");
-const TENV = { TMPDIR: TMPD };
+// os.tmpdir() reads TMPDIR on posix, TEMP then TMP on win32
+const tenvAt = (d) => ({ TMPDIR: d, TEMP: d, TMP: d });
+const TENV = tenvAt(TMPD);
+const WIN32 = process.platform === "win32";
 const LEDGER = path.join(REPO, ".git", "proteus", "scratch-ledger.jsonl");
 const SCR = path.join(REPO, ".git", "proteus", "scratch");
 const ledger = () => { try { return fs.readFileSync(LEDGER, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const entry = (name) => ledger().find((e) => e.path === path.join(TMPD, name));
 const t = (name) => path.join(TMPD, name);
 const has = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
-const wtList = () => g(REPO, "worktree", "list", "--porcelain");
+const wtList = () => g(REPO, "worktree", "list", "--porcelain").split("/").join(path.sep); // git for windows prints D:/a/...
 let tu = 0;
 // one Bash call: PreToolUse snapshot, make() plays the command, PostToolUse (or Failure) diffs
 function bash(command, make, { extra = {}, stdout = "", event = "PostToolUse", script = SC, error } = {}) {
@@ -458,8 +461,11 @@ ok("scratch: no duplicate entry for an existing path", ledger().filter((e) => e.
 // another user's file (getuid faked in-process) is ignored
 const FOREIGN = path.join(W, "foreign.js");
 fs.writeFileSync(FOREIGN, `const u = process.getuid(); process.getuid = () => u + 1; require(${JSON.stringify(SC)});`);
-bash(`cat ${t("hs-foreign")}`, () => fs.writeFileSync(t("hs-foreign"), "x"), { script: FOREIGN });
-ok("scratch: another user's file is ignored", !entry("hs-foreign") && has(t("hs-foreign")));
+const NO_UID = "win32 has no uid: the temp dir is per user and the hook skips the owner check";
+if (WIN32) { fs.writeFileSync(t("hs-foreign"), "x"); console.log(`skipped scratch: another user's file is ignored: ${NO_UID}`); } else {
+  bash(`cat ${t("hs-foreign")}`, () => fs.writeFileSync(t("hs-foreign"), "x"), { script: FOREIGN });
+  ok("scratch: another user's file is ignored", !entry("hs-foreign") && has(t("hs-foreign")));
+}
 // a worker in its worktree: keyed by its branch; a git worktree is flagged
 const sw = { agent_id: "w5", agent_type: "proteus-worker", cwd: WT };
 bash(`git worktree add --detach ${t("hs-wt")} && git worktree add --detach ${t("hs-wtlock")}`, () => {
@@ -501,7 +507,8 @@ bash(`touch ${t("hs-owned")}`, () => fs.writeFileSync(t("hs-owned"), "x"));
 const OWNED = path.join(W, "owned.js");
 fs.writeFileSync(OWNED, `const fs = require("fs"); const l = fs.lstatSync; fs.lstatSync = (p, o) => { const st = l(p, o); if (String(p).endsWith("hs-owned")) st.uid += 1; return st; }; require(${JSON.stringify(SC)});`);
 r = run(OWNED, "", { args: ["--sweep", "bl1077"], env: TENV });
-ok("scratch sweep: an entry now owned by another user is dropped untouched", has(t("hs-owned")) && !entry("hs-owned") && !has(t("hs-lead")), r.out + r.err);
+if (WIN32) console.log(`skipped scratch sweep: an entry now owned by another user is dropped untouched: ${NO_UID}`);
+else ok("scratch sweep: an entry now owned by another user is dropped untouched", has(t("hs-owned")) && !entry("hs-owned") && !has(t("hs-lead")), r.out + r.err);
 ok("scratch sweep run: deletes only ledgered entries", !has(t("tmp.AbC123")) && !has(t("hs-fail")) && !has(t("hs-dir")) &&
   ["hs-unnamed", "hs-sub-long", "hs-sub-2", "hs-foreign", "hs-other", "hs-replaced"].every((n) => has(t(n))), fs.readdirSync(TMPD).join(","));
 ok("scratch sweep: symlinks removed as links, targets untouched", !has(t("hs-link")) && fs.readFileSync(path.join(OUTSIDE, "keep.txt"), "utf8") === "k" && fs.readdirSync(OUTSIDE).length === 1);
@@ -536,7 +543,7 @@ ok("autostart: size cache rewritten, under 1 GB drops scratch=", JSON.parse(fs.r
 // fail open
 ok("scratch: garbage stdin exit 0", run(SC, "not json", { env: TENV }).code === 0);
 ok("scratch: post without snapshot, odd input exit 0", run(SC, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "none", tool_input: { command: 5 }, tool_response: 7 }, { env: TENV }).code === 0);
-r = run(SC, { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "x" }, { env: { TMPDIR: path.join(W, "no-such-dir") } });
+r = run(SC, { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "x" }, { env: tenvAt(path.join(W, "no-such-dir")) });
 ok("scratch: unreadable temp dir exit 0, silent", r.code === 0 && r.out === "" && r.err === "");
 ok("scratch: outside git exit 0", run(SC, { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "y" }, { cwd: W, env: TENV }).code === 0);
 ok("scratch: PROTEUS=0 skips", (() => { bash(`mkdir ${t("hs-off")}`, () => {}); const n = ledger().length; run(SC, { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "z", tool_input: { command: `mkdir ${t("hs-off2")}` } }, { env: { ...TENV, PROTEUS: "0" } }); return !fs.existsSync(path.join(REPO, ".git", "proteus", "scratch-snap", "z")) && ledger().length === n; })());
@@ -593,13 +600,14 @@ fs.writeFileSync(CLOG, "");
 r = run(INST, "", { cwd: CWD, env: cenv(CH, { FAKE_CLAUDE: "fail" }) });
 ok("context-mode: CLI failure stops at the failed step, prints the commands, not fatal", r.code === 0 && clog().join("|") === "plugin marketplace add mksglu/context-mode" &&
   /not installed\. Run:\n  claude plugin marketplace add .*\n  claude plugin install /.test(r.err), clog().join(" | ") + r.err);
-// node version, mocked through a preload
+// node version, mocked through a preload; the fix names the platform installer
+const NODEFIX = WIN32 ? "winget install OpenJS\\.NodeJS\\.LTS" : "nodejs\\.org";
 CH = chome("oldnode");
 r = run(INST, "", { cwd: CWD, env: cenv(CH, { NODE_OPTIONS: `--require ${OLDNODE}`, FAKE_NODE: "22.4.9" }) });
-ok("node < 22.5: install dies with the fix, writes nothing", r.code === 1 && /node 22\.4\.9 is older than 22\.5\.0, which the required context-mode plugin needs\. Upgrade: .*nodejs\.org, then re-run/.test(r.err) &&
+ok("node < 22.5: install dies with the fix, writes nothing", r.code === 1 && new RegExp(`node 22\\.4\\.9 is older than 22\\.5\\.0, which the required context-mode plugin needs\\. Upgrade: .*${NODEFIX}, then re-run`).test(r.err) &&
   fs.readdirSync(path.join(CH, ".claude")).length === 0 && clog().length === 1, r.err);
 const nodeLine = (v) => run(INST, "", { args: ["--doctor"], cwd: CWD, env: cenv(CH, { NODE_OPTIONS: `--require ${OLDNODE}`, FAKE_NODE: v }) }).out.split("\n")[0];
-ok("doctor: node 20.11.0 → FIX", /^FIX  node 20\.11\.0 is older than 22\.5\.0 \(context-mode needs it\) — .*nodejs\.org$/.test(nodeLine("20.11.0")), nodeLine("20.11.0"));
+ok("doctor: node 20.11.0 → FIX", new RegExp(`^FIX  node 20\\.11\\.0 is older than 22\\.5\\.0 \\(context-mode needs it\\) — .*${NODEFIX}$`).test(nodeLine("20.11.0")), nodeLine("20.11.0"));
 ok("doctor: node 22.5.0 and 23.0.1 → ok", nodeLine("22.5.0") === "ok   node 22.5.0" && nodeLine("23.0.1") === "ok   node 23.0.1");
 // autostart: context-mode=missing on the state line, a cheap read of the same two files
 const PLUG = path.join(HOME, ".claude", "plugins", "installed_plugins.json"), HSET = path.join(HOME, ".claude", "settings.json");
@@ -700,7 +708,7 @@ ok("install: strips laya and layaOffered from proteus.json", r.code === 0 && !("
   g(UA, "push", "-q");
   const UH = chome("upd");
   fs.writeFileSync(path.join(UH, ".claude", "proteus.json"), JSON.stringify({ home: UC, autoUpdate: false, behind: 3 }));
-  r = run(path.join(UC, "install.js"), "", { args: ["--update"], cwd: CWD, env: { ...cenv(UH), ...ENV, HOME: UH, PATH: cenv(UH).PATH } });
+  r = run(path.join(UC, "install.js"), "", { args: ["--update"], cwd: CWD, env: { ...ENV, ...cenv(UH) } });
   const uj = cjson(UH, "proteus.json");
   ok("--update: lists feat and fix subjects, not docs", r.code === 0 && /\n  feat: shiny thing\n  fix: a bug\n/.test(r.out) && !/docs: words/.test(r.out), r.out + r.err);
   ok("--update: pre-tour config gets the old HEAD as tour baseline, behind cleared", uj.toured === before && !("behind" in uj) && uj.home === UC, JSON.stringify(uj));
@@ -732,7 +740,9 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
 // ---- takeover: a real hivemind install (b309837, both CLIs) replaced by Proteus
 {
   const OLD = path.join(W, "hivemind-old"); fs.mkdirSync(OLD);
-  execFileSync("sh", ["-c", `git -C "${path.dirname(INST)}" archive b309837 | tar -x -C "${OLD}"`]);
+  // the tree into OLD through a throwaway index: no sh or tar, and the checkout's own index untouched
+  const gitDir = execFileSync("git", ["rev-parse", "--absolute-git-dir"], { cwd: path.dirname(INST), encoding: "utf8", windowsHide: true, timeout: 60000 }).trim();
+  execFileSync("git", ["-c", "core.autocrlf=false", "checkout", "b309837", "--", "."], { cwd: OLD, env: { ...process.env, GIT_DIR: gitDir, GIT_WORK_TREE: OLD, GIT_INDEX_FILE: path.join(W, "old.index") }, stdio: "ignore", windowsHide: true, timeout: 60000 });
   const TH = chome("takeover"), TX = path.join(TH, ".codex"), PJ = path.join(TH, "Projects");
   const tenv = (extra = {}) => cenv(TH, { CODEX_HOME: TX, ...extra });
   const repo = (n) => {
@@ -1068,7 +1078,7 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   g(XP, "add", "teams/templates/hooks/commit-msg.js");
   d = xdoc();
   const gate = /run: (node teams\/templates\/hooks\/commit-msg\.js) \{1\}/.exec(fs.readFileSync(path.join(XP, "lefthook.yml"), "utf8"));
-  const msg = (m) => { fs.writeFileSync(path.join(W, "cx-msg"), m); return spawnSync("sh", ["-c", `${gate[1]} "${path.join(W, "cx-msg")}"`], { cwd: XP, encoding: "utf8" }).status; };
+  const msg = (m) => { fs.writeFileSync(path.join(W, "cx-msg"), m); return spawnSync(process.execPath, [gate[1].replace(/^node /, ""), path.join(W, "cx-msg")], { cwd: XP, encoding: "utf8", windowsHide: true }).status; };
   ok("commit-msg gate: the template lefthook.yml names the tracked teams/ copy, which accepts a conventional message and rejects others",
     /^ok   commit-msg gate runs a tracked file$/m.test(d) && gate && msg("feat: add a thing\n") === 0 && msg("added stuff\n") !== 0 &&
     /node teams\/templates\/hooks\/commit-msg\.js "\$RUNNER_TEMP\/msg"/.test(fs.readFileSync(path.join(ROOT, "templates", "ci", "proteus-gates.yml"), "utf8")), d);

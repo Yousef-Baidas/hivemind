@@ -475,7 +475,7 @@ if (process.platform === "win32" || (typeof process.getuid === "function" && pro
   const list = () => g(LW, "worktree", "list", "--porcelain");
   // the live worktree's registered path, when git still has it and its .git file is there
   const liveAt = () => {
-    const p = lines(list()).filter((l) => l.startsWith("worktree ")).map((l) => l.slice(9)).find((x) => x.endsWith(tail));
+    const p = lines(list()).filter((l) => l.startsWith("worktree ")).map((l) => path.normalize(l.slice(9))).find((x) => x.endsWith(tail)); // git for windows prints D:/a/...
     return p && fs.existsSync(path.join(p, ".git")) ? p : "";
   };
   ok("scratch worktree (5): after --project, git worktree list shows the scratch worktree registered and not prunable", r.code === 0 && !!liveAt() && !/^prunable\b/m.test(list()), `${r.code} ${list().replace(/\n/g, " | ")}`);
