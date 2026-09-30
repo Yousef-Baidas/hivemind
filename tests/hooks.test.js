@@ -1079,6 +1079,91 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
     /lead     -> \.codex\/hooks\.json/.test(r.out) && !/settings\.local\.json/.test(r.out) && !fs.existsSync(path.join(XP, ".claude")), r.out + r.err);
 }
 
+// ---- installer-fixes (#37): doctor --fix links team skills, copyTeams keeps a custom roster, sandboxRoots compares roots by samePath
+{
+  let d;
+  const IH = chome("instfix");
+  const shippedTeams = path.join(ROOT, "templates", "teams");
+  const names = [];
+  for (const x of fs.readdirSync(shippedTeams)) {
+    for (const f of ["required.txt", "skills.txt"]) {
+      const file = path.join(shippedTeams, x, f);
+      if (!fs.existsSync(file)) continue;
+      for (const l of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+        const [a, n] = l.trim().split(/\s+/);
+        if (a && !a.startsWith("#") && n && !names.includes(n)) names.push(n);
+      }
+    }
+  }
+  const gskill = (home, n) => { const s = path.join(home, ".claude", "skills", n); fs.mkdirSync(s, { recursive: true }); fs.writeFileSync(path.join(s, "SKILL.md"), `---\nname: ${n}\n---\n`); };
+  const repoAt = (n) => {
+    const x = path.join(W, n); g(W, "init", "-q", "-b", "main", x);
+    fs.writeFileSync(path.join(x, "README.md"), "x\n"); g(x, "add", "-A"); g(x, "commit", "-qm", "init");
+    return x;
+  };
+  const row = (out, re) => out.split("\n").filter((l) => re.test(l)).join(" / ");
+
+  // (a) doctor --fix links the team skills already in the global skills dir, with no network
+  const FA = repoAt("instfix-a");
+  r = run(INST, "", { args: ["--project"], cwd: FA, env: cenv(IH) });
+  const tl = (p, n) => path.join(FA, "teams", p, ".claude", "skills", n);
+  ok("installer-fixes (a): setup, --project with no global skills leaves the team skills unlinked", r.code === 0 && names.length > 3 && /^FIX  team skills not linked/m.test(run(INST, "", { args: ["--doctor"], cwd: FA, env: cenv(IH) }).out), r.out + r.err);
+  const calls0 = clog().length;
+  for (const n of names) gskill(IH, n);
+  d = run(INST, "", { args: ["--doctor", "--fix"], cwd: FA, env: cenv(IH) }).out;
+  const d2 = run(INST, "", { args: ["--doctor"], cwd: FA, env: cenv(IH) }).out;
+  ok("installer-fixes (a): --doctor --fix links the team skills; the next --doctor reads ok team skills linked", /^ok   team skills linked( \(fixed\))?$/m.test(d) && /^ok   team skills linked$/m.test(d2), row(d + "\n" + d2, /team skills/));
+  const one = ["backend", "sql-optimization"];
+  ok("installer-fixes (a): the links resolve into the fake global skills dir, nothing fetched", (() => { try { return fs.lstatSync(tl(...one)).isSymbolicLink() && fs.realpathSync(tl(...one)) === fs.realpathSync(path.join(IH, ".claude", "skills", one[1])); } catch { return false; } })() &&
+    !clog().slice(calls0).some((l) => /skills add|npx/.test(l)), tl(...one));
+  // a skill missing globally stays a FIX row that names --project --install
+  const FB = repoAt("instfix-a2"), IH2 = chome("instfix2"), hole = "sql-optimization";
+  run(INST, "", { args: ["--project"], cwd: FB, env: cenv(IH2) });
+  for (const n of names.filter((x) => x !== hole)) gskill(IH2, n);
+  d = run(INST, "", { args: ["--doctor", "--fix"], cwd: FB, env: cenv(IH2) }).out;
+  ok("installer-fixes (a): a skill missing globally stays a FIX row naming --project --install, the rest linked",
+    /^FIX  team skills not linked \(backend 1\)/m.test(d) && /--project --install/.test(row(d, /^FIX  team skills/)) && !fs.existsSync(path.join(FB, "teams", "backend", ".claude", "skills", hole)) &&
+    fs.existsSync(path.join(FB, "teams", "backend", ".claude", "skills", "sql-code-review")), row(d, /team skills/));
+
+  // (b) copyTeams: a repo with its own routing gets no shipped profile folder back; a fresh one gets them all
+  const RB = repoAt("instfix-b"), TB = path.join(RB, "teams");
+  fs.mkdirSync(path.join(TB, "cli"), { recursive: true }); fs.mkdirSync(path.join(TB, "qa"), { recursive: true });
+  fs.writeFileSync(path.join(TB, "ROUTING.md"), "| Deliverable | Team |\n|---|---|\n| `install.js` | cli |\n| tests | qa |\n");
+  fs.writeFileSync(path.join(TB, "qa", "required.txt"), "stale/repo old-skill\n");
+  r = run(INST, "", { args: ["--project"], cwd: RB, env: cenv(chome("instfix-b")) });
+  ok("installer-fixes (b): a repo whose ROUTING.md names only cli and qa gets no teams/frontend or teams/backend", r.code === 0 &&
+    fs.readdirSync(TB).filter((x) => fs.statSync(path.join(TB, x)).isDirectory() && x !== "templates").sort().join() === "cli,qa", fs.readdirSync(TB).join() + r.out + r.err);
+  ok("installer-fixes (b): required.txt and templates/ are still refreshed, ROUTING.md untouched",
+    fs.readFileSync(path.join(TB, "qa", "required.txt"), "utf8") === fs.readFileSync(path.join(shippedTeams, "qa", "required.txt"), "utf8") &&
+    fs.existsSync(path.join(TB, "templates", "hooks")) && fs.readFileSync(path.join(TB, "ROUTING.md"), "utf8").includes("| `install.js` | cli |"), r.out);
+  const RF = repoAt("instfix-b2");
+  r = run(INST, "", { args: ["--project"], cwd: RF, env: cenv(chome("instfix-b2")) });
+  ok("installer-fixes (b): with no ROUTING.md, every shipped profile is seeded", r.code === 0 && fs.existsSync(path.join(RF, "teams", "ROUTING.md")) &&
+    ["frontend", "backend", "devops", "qa", "security"].every((x) => fs.existsSync(path.join(RF, "teams", x, "PROFILE.md"))), fs.readdirSync(path.join(RF, "teams")).join());
+
+  // (c) sandboxRoots on win32: roots match by samePath, so the drive letter's case does not matter. The child fakes
+  // win32 and runs in a temp cwd, where "C:\x\repo\.codex\config.toml" is just a file name.
+  const CW = path.join(W, "instfix-c"); fs.mkdirSync(CW);
+  const cjs = path.join(W, "instfix-c.js");
+  fs.writeFileSync(cjs, `process.chdir(${JSON.stringify(CW)});
+Object.defineProperty(process, "platform", { value: "win32" });
+const fs = require("fs");
+const cx = require(${JSON.stringify(path.join(SRC, "proteus-harness-codex.js"))});
+const p = require("path"); Object.assign(p, p.win32); // after the requires: the module loader needs posix paths
+const file = "C:\\\\x\\\\repo\\\\.codex\\\\config.toml";
+const go = (roots) => { fs.writeFileSync(file, "[sandbox_workspace_write]\\nwritable_roots = " + JSON.stringify(roots).replace(/","/g, '", "') + "\\n"); const res = cx.sandboxRoots("C:\\\\x\\\\repo"); return { res, text: fs.readFileSync(file, "utf8") }; };
+console.log(JSON.stringify({ same: go(["c:\\\\x\\\\repo-proteus"]), stale: go(["c:\\\\x\\\\repo-hive"]), both: go(["c:\\\\x\\\\repo-hive", "c:\\\\x\\\\repo-proteus"]) }));`);
+  const cr = spawnSync(process.execPath, [cjs], { encoding: "utf8" });
+  let cw = {}; try { cw = JSON.parse(cr.stdout); } catch {}
+  const tomlOf = (roots) => "[sandbox_workspace_write]\nwritable_roots = " + JSON.stringify(roots).replace(/","/g, '", "') + "\n";
+  ok("installer-fixes (c): win32, c:\\x\\repo-proteus already listed for C:\\x\\repo: roots unchanged, not duplicated",
+    !!cw.same && cw.same.res.changed === false && !cw.same.res.error && cw.same.text === tomlOf(["c:\\x\\repo-proteus"]), cr.stderr + JSON.stringify(cw.same));
+  ok("installer-fixes (c): win32, a stale c:\\x\\repo-hive with no live worktrees is dropped and the -proteus root added once",
+    !!cw.stale && !cw.stale.text.toLowerCase().includes("repo-hive") && cw.stale.text.split("repo-proteus").length === 2, cr.stderr + JSON.stringify(cw.stale));
+  ok("installer-fixes (c): win32, a stale -hive root beside a -proteus root in another case: only the -hive root goes",
+    !!cw.both && cw.both.text === tomlOf(["c:\\x\\repo-proteus"]), cr.stderr + JSON.stringify(cw.both));
+}
+
 lib.summary();
-const med = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
+const med =(a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
 console.log("median ms: " + Object.entries(timings).map(([k, v]) => `${k}=${med(v).toFixed(0)}`).join(" ") + ` statusline(warm)=${med(slTimes).toFixed(0)}`);
