@@ -1141,6 +1141,28 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   ok("installer-fixes (b): with no ROUTING.md, every shipped profile is seeded", r.code === 0 && fs.existsSync(path.join(RF, "teams", "ROUTING.md")) &&
     ["frontend", "backend", "devops", "qa", "security"].every((x) => fs.existsSync(path.join(RF, "teams", x, "PROFILE.md"))), fs.readdirSync(path.join(RF, "teams")).join());
 
+  // verify-profiles: a repo with its own ROUTING.md still gets the verify-only profiles qa and security, when absent
+  const vp = (n) => { const x = repoAt("vp-" + n); fs.mkdirSync(path.join(x, "teams", "cli"), { recursive: true }); fs.writeFileSync(path.join(x, "teams", "ROUTING.md"), "| Deliverable | Team |\n|---|---|\n| `install.js` | cli |\n"); return x; };
+  const VA = vp("a");
+  r = run(INST, "", { args: ["--project"], cwd: VA, env: cenv(chome("vp-a")) });
+  ok("verify-profiles (a): ROUTING.md names only cli: teams/qa and teams/security get PROFILE.md, no frontend or backend", r.code === 0 &&
+    ["qa", "security"].every((x) => fs.existsSync(path.join(VA, "teams", x, "PROFILE.md"))) && !["frontend", "backend"].some((x) => fs.existsSync(path.join(VA, "teams", x))), fs.readdirSync(path.join(VA, "teams")).join() + r.out + r.err);
+  const VB = vp("b"), edited = path.join(VB, "teams", "qa", "PROFILE.md");
+  fs.mkdirSync(path.dirname(edited), { recursive: true }); fs.writeFileSync(edited, "# qa\nhand-edited by the repo\n");
+  r = run(INST, "", { args: ["--project"], cwd: VB, env: cenv(chome("vp-b")) });
+  ok("verify-profiles (b): a hand-edited teams/qa/PROFILE.md is byte-identical after --project, and the absent teams/security is seeded in the same run", r.code === 0 &&
+    fs.readFileSync(edited, "utf8") === "# qa\nhand-edited by the repo\n" && fs.existsSync(path.join(VB, "teams", "security", "PROFILE.md")), r.out + r.err);
+  const VC = vp("c"), outside = path.join(W, "vp-c-outside"); fs.mkdirSync(outside);
+  fs.symlinkSync(outside, path.join(VC, "teams", "security"), "junction");
+  r = run(INST, "", { args: ["--project"], cwd: VC, env: cenv(chome("vp-c")) });
+  ok("verify-profiles (c): a teams/security symlink to an outside dir: nothing is written into that dir", r.code === 0 &&
+    fs.readdirSync(outside).length === 0 && fs.lstatSync(path.join(VC, "teams", "security")).isSymbolicLink(), fs.readdirSync(outside).join() + r.out + r.err);
+  const VD = vp("d"), vh = cenv(chome("vp-d"));
+  run(INST, "", { args: ["--project"], cwd: VD, env: vh });
+  fs.rmSync(path.join(VD, "teams", "security"), { recursive: true, force: true });
+  d = run(INST, "", { args: ["--doctor"], cwd: VD, env: vh }).out;
+  ok("verify-profiles (d): with teams/security deleted, --doctor prints a FIX row naming security and --project", /^FIX .*security.*--project/m.test(d), d);
+
   // (c) sandboxRoots on win32: roots match by samePath, so the drive letter's case does not matter. The child fakes
   // win32 and runs in a temp cwd, where "C:\x\repo\.codex\config.toml" is just a file name.
   const CW = path.join(W, "instfix-c"); fs.mkdirSync(CW);
