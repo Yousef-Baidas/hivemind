@@ -498,7 +498,7 @@ function copyTeams(root) {
     const src = path.join(SHIPPED_TEAMS, p), dest = path.join(teams, p);
     if (hadRoster && !isDir(dest)) continue;
     fs.mkdirSync(dest, { recursive: true });
-    for (const f of hadRoster ? [] : ["PROFILE.md", "skills.txt"]) {
+    for (const f of ["PROFILE.md", "skills.txt"]) {
       if (isFile(path.join(src, f)) && !lstat(path.join(dest, f))) fs.copyFileSync(path.join(src, f), path.join(dest, f));
     }
     // required.txt is the pipeline's, not the scout's or the repo's: always refreshed
