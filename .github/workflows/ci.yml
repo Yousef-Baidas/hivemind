@@ -30,7 +30,7 @@ jobs:
           for c in $(git rev-list "origin/$BASE_REF"..HEAD); do
             git log -1 --format=%B "$c" > "$RUNNER_TEMP/msg" && node templates/hooks/commit-msg.js "$RUNNER_TEMP/msg" || exit 1
           done
-  # Not a required check yet: a red Windows job must show red, so no continue-on-error.
+  # not required yet; no continue-on-error so a red run shows red
   gates-windows:
     runs-on: windows-latest
     defaults:
@@ -42,6 +42,7 @@ jobs:
         run: |
           "TEMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "TMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}   # the PR head, not the synthetic merge commit
@@ -50,7 +51,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-      - run: git config --global core.autocrlf false
       - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: node tests/run.js
