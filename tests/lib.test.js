@@ -45,17 +45,23 @@ else {
 // 2. bad tag or name throws before any write; os.tmpdir() points at an empty dir so a stray write shows
 const base = fs.mkdtempSync(path.join(os.tmpdir(), "proteus-libtest-"));
 const realTmpdir = os.tmpdir;
-let badTag, badName;
-os.tmpdir = () => base;
+// tmpdir sits two levels below base, so an escaping tag's mkdtemp still lands inside base
+const nested = path.join(base, "n1", "n2");
+fs.mkdirSync(nested, { recursive: true });
+let badTag, escTag, badName;
+os.tmpdir = () => nested;
 try {
   badTag = attempt(() => sandbox("../x"));
+  escTag = attempt(() => sandbox("a/../../x"));
   badName = attempt(() => workdir("a/.."));
 } finally {
   os.tmpdir = realTmpdir;
 }
 check('sandbox("../x") throws a validation error', !!badTag.error && !/not implemented/.test(badTag.error.message), badTag.error ? badTag.error.message : "returned");
+check('sandbox("a/../../x") throws', !!escTag.error, escTag.error ? escTag.error.message : `returned ${escTag.value.dir}`);
 check('workdir("a/..") throws', !!badName.error, badName.error ? badName.error.message : "returned");
-check("an invalid tag or name creates nothing under os.tmpdir()", fs.readdirSync(base).length === 0, fs.readdirSync(base).join(" "));
+const left = fs.readdirSync(base, { recursive: true }).map((p) => p.split(path.sep).join("/")).sort();
+check("an invalid tag or name creates nothing, inside os.tmpdir() or above it", left.join(" ") === "n1 n1/n2", left.join(" "));
 fs.rmSync(base, { recursive: true, force: true });
 
 // 3. the sandbox env keeps every home under dir
