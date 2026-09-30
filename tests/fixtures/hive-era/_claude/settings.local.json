@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hive-autostart.js\"", "timeout": 60 }] }
+    ]
+  },
+  "statusLine": { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/hive-statusline.js\"" }
+}
