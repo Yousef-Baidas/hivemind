@@ -1,25 +1,30 @@
 #!/usr/bin/env node
 // One status line for the human: node .claude/hooks/proteus-status.js [run]
-// Run (open hive/<run> branch or the argument), current open milestone and its tickets closed,
-// open PRs into hive/<run> and how many carry a verdict, and an ETA:
+// Run (open proteus/<run> branch or the argument), current open milestone and its tickets closed,
+// open PRs into proteus/<run> and how many carry a verdict, and an ETA:
 // median ticket time (closedAt − createdAt over the run's closed tickets) × open tickets
 // in the milestone ÷ parallelism (open PRs + worker branches without a PR, min 1).
+// A run opened before the rename is read under its legacy names (lib.LEGACY) until it closes.
 "use strict";
 const path = require("path");
 const lib = require(path.join(__dirname, "proteus-lib.js"));
 
 const root = path.resolve(lib.projectRoot());
-const NOT_TICKET = new Set(["hive-review", "hive-log", "hive-debt"]);
 
-const branches = lib.git(["-C", root, "branch", "--list", "hive/*", "--format=%(refname:short)"], root).split("\n").filter(Boolean);
-const runBranches = branches.filter((b) => !branches.some((a) => a !== b && b.startsWith(a + "-")));
-const run = (process.argv[2] || (runBranches[0] || "")).replace(/^hive\//, "");
-if (!run) { console.log("no open run (no hive/<run> branch)"); return; }
+// both branch prefixes: a run opened before the rename keeps its legacy branch, labels and PR base
+const common = lib.gitCommonDir(root);
+const branches = lib.runRefs(common);
+const runBranches = lib.runBranches(common);
+const arg = process.argv[2] || "";
+const run = lib.runName(arg || runBranches[0] || "");
+if (!run) { console.log(`no open run (no ${lib.CURRENT.branch}<run> branch)`); return; }
+const names = lib.schemeOf(arg) || lib.schemeOf(runBranches.find((b) => lib.runName(b) === run) || "") || lib.CURRENT;
+const NOT_TICKET = new Set([names.review, names.log, names.debt]);
 
 const parse = (s) => { try { return JSON.parse(s); } catch { return null; } };
-const issues = parse(lib.gh(["issue", "list", "--label", "hive", "--state", "all", "--json", "number,state,createdAt,closedAt,milestone,labels", "--limit", "500"], root, 10000));
+const issues = parse(lib.gh(["issue", "list", "--label", names.label, "--state", "all", "--json", "number,state,createdAt,closedAt,milestone,labels", "--limit", "500"], root, 10000));
 if (!Array.isArray(issues)) { console.log(`run ${run} · tracker unreachable (gh issue list failed)`); return; }
-const prs = parse(lib.gh(["pr", "list", "--base", `hive/${run}`, "--state", "open", "--json", "number,headRefName,reviews,comments", "--limit", "100"], root, 10000)) || [];
+const prs = parse(lib.gh(["pr", "list", "--base", `${names.branch}${run}`, "--state", "open", "--json", "number,headRefName,reviews,comments", "--limit", "100"], root, 10000)) || [];
 
 const tickets = issues.filter((i) => i.milestone && String(i.milestone.title).startsWith(run + "/") && !(i.labels || []).some((l) => NOT_TICKET.has(l.name)));
 const isOpen = (i) => String(i.state).toUpperCase() === "OPEN";
@@ -39,7 +44,7 @@ const withVerdict = prs.filter((p) => [...(p.reviews || []), ...(p.comments || [
 parts.push(`${prs.length} PRs open (${withVerdict} verdict)`);
 
 const heads = new Set(prs.map((p) => p.headRefName));
-const inProgress = branches.filter((b) => b.startsWith(`hive/${run}-`) && !heads.has(b)).length;
+const inProgress = branches.filter((b) => b.startsWith(`${names.branch}${run}-`) && !heads.has(b)).length;
 const parallel = Math.max(1, prs.length + inProgress);
 const took = tickets.filter((i) => !isOpen(i) && i.closedAt && i.createdAt).map((i) => Date.parse(i.closedAt) - Date.parse(i.createdAt)).filter((d) => d > 0).sort((a, b) => a - b);
 if (took.length < 2) parts.push(`eta: n/a (need 2 closed tickets)`);

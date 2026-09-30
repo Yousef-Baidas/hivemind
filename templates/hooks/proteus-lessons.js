@@ -5,7 +5,7 @@
 // prompt, path; default all), scope (all | lead | worker; default all).
 // before a shell call → command; before an edit or read → path; after a shell call → output;
 // prompt submit → prompt. A hit injects the lesson as additionalContext, once per session
-// (per subagent) per lesson, at most 2 per event; hits are counted in <common>/hive/lesson-hits.json.
+// (per subagent) per lesson, at most 2 per event; hits are counted in <common>/proteus/lesson-hits.json.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -36,17 +36,17 @@ lib.run((ev, ad) => {
   try { names = fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort(); } catch { return; }
   if (!names.length) return;
 
-  const hive = lib.hiveDir(common);
+  const store = lib.stateDir(common);
   const scope = lib.isLead(ev, root) ? "lead" : "worker";
   const hits = [];
-  for (const l of load(dir, names, hive)) {
+  for (const l of load(dir, names, store)) {
     if (!l.on.includes(kind) || (l.scope !== "all" && l.scope !== scope)) continue;
     let re;
     try { re = new RegExp(l.trigger, kind === "path" ? "im" : "i"); } catch { continue; } // a bad regex skips its lesson only; one path per line
     if (re.test(text)) hits.push(l);
   }
 
-  const seenFile = path.join(hive, "lessons-seen", String(ev.session || "none").replace(/[^\w.-]/g, "_") + (ev.agent ? "-" + String(ev.agent).replace(/[^\w.-]/g, "_") : ""));
+  const seenFile = path.join(store, "lessons-seen", String(ev.session || "none").replace(/[^\w.-]/g, "_") + (ev.agent ? "-" + String(ev.agent).replace(/[^\w.-]/g, "_") : ""));
   const seen = new Set(read(seenFile).split("\n").filter(Boolean));
   const fresh = hits.filter((l) => !seen.has(l.file)).slice(0, MAX_PER_EVENT);
   if (!fresh.length) return;
@@ -54,7 +54,7 @@ lib.run((ev, ad) => {
   if (!seen.size) prune(path.dirname(seenFile));
   fs.mkdirSync(path.dirname(seenFile), { recursive: true });
   fs.appendFileSync(seenFile, fresh.map((l) => l.file + "\n").join(""));
-  const countFile = path.join(hive, "lesson-hits.json");
+  const countFile = path.join(store, "lesson-hits.json");
   const counts = lib.readJSON(countFile, {}) || {};
   const now = new Date().toISOString();
   for (const l of fresh) counts[l.file] = { hits: ((counts[l.file] || {}).hits || 0) + 1, last: now };
@@ -62,7 +62,7 @@ lib.run((ev, ad) => {
 
   ad.context(ev, fresh.map((l) => {
     const body = l.body.length > MAX_CHARS ? l.body.slice(0, MAX_CHARS) + " …" : l.body;
-    return `hive lesson docs/lessons/${l.file} (matched this ${kind}):\n${body}`;
+    return `proteus lesson docs/lessons/${l.file} (matched this ${kind}):\n${body}`;
   }).join("\n\n"));
 });
 
@@ -73,10 +73,10 @@ function capped(s) {
   return s.length > OUTPUT_CAP ? s.slice(0, OUTPUT_CAP / 2) + "\n" + s.slice(-OUTPUT_CAP / 2) : s;
 }
 
-// parsed lessons, cached in <common>/hive/lessons-cache.json keyed by the files' mtimes and sizes
-function load(dir, names, hive) {
+// parsed lessons, cached in <common>/proteus/lessons-cache.json keyed by the files' mtimes and sizes
+function load(dir, names, store) {
   const key = names.map((f) => { try { const st = fs.statSync(path.join(dir, f)); return `${f}:${st.mtimeMs}:${st.size}`; } catch { return f; } }).join("|");
-  const cacheFile = path.join(hive, "lessons-cache.json");
+  const cacheFile = path.join(store, "lessons-cache.json");
   const cache = lib.readJSON(cacheFile, null);
   if (cache && cache.key === key && Array.isArray(cache.lessons)) return cache.lessons;
   const lessons = [];

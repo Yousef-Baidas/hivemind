@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PreToolUse hook for the lead's session (main checkout); tools are the hive's (edit, read, shell,
+// PreToolUse hook for the lead's session (main checkout); tools are the agents' (edit, read, shell,
 // monitor, spawn), mapped from the CLI's by the harness adapter.
 // Main thread:
 // 1. The lead writes no code: Edit/Write inside the repo is refused except the docs it owns.
@@ -13,7 +13,8 @@
 // Subagents (ev.agent set; they run in the lead's process, so a worktree's own hooks may never load):
 //   no background Bash, no Monitor, no --edit-last. An edit inside a checkout with .claude/proteus-owned
 //   must be an owned path (same rule as proteus-owned-paths.js); an edit in this repo's main checkout
-//   while a hive/* branch exists is refused (except the scout's teams/*/skills.txt). All else passes.
+//   while a run branch exists (proteus/* or a pre-rename run's, lib.runOpen) is refused (except the
+//   scout's teams/*/skills.txt). All else passes.
 // Linked worktrees and PROTEUS=0 sessions pass untouched.
 // Exit 2 = block; the message on stderr reaches the model as the tool's error.
 "use strict";

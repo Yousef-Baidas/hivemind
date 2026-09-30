@@ -1,6 +1,6 @@
 ---
 name: proteus-qa-verifier
-description: Proteus wave-level verifier. Runs the integration suites and a clean rebuild of every deliverable on the hive/<run> branch after a wave merges; never edits.
+description: Proteus wave-level verifier. Runs the integration suites and a clean rebuild of every deliverable on the proteus/<run> branch after a wave merges; never edits.
 model: sonnet
 tools:
   - Read

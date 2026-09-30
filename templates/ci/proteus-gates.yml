@@ -1,10 +1,10 @@
-# .github/workflows/hive-gates.yml — written by the Proteus scaffold ticket.
-# Every PR into hive/* runs the same gates the worker ran. Branch protection on
-# hive/<run> requires this job green plus one approving review (the verifier).
-name: hive-gates
+# .github/workflows/proteus-gates.yml — written by the Proteus scaffold ticket.
+# Every PR into proteus/* runs the same gates the worker ran. Branch protection on
+# proteus/<run> requires this job green plus one approving review (the verifier).
+name: proteus-gates
 on:
   pull_request:
-    branches: ["hive/**"]
+    branches: ["proteus/**"]
 jobs:
   gates:
     runs-on: ubuntu-latest

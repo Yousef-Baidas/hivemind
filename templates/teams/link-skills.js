@@ -17,6 +17,12 @@
 // a differing hash on this machine prints "drift: <skill>" and keeps the committed hash.
 // Links are symlinks, junctions on Windows (no admin needed); removing one never touches
 // its target. install.js requires this file for the same link helpers.
+// A skill name is one path segment ([A-Za-z0-9][A-Za-z0-9._-]*) or it is warned and skipped (#13).
+// Every delete here goes through removeLink, which removes only a link directly in the directory
+// its caller expects: teams/<profile>/{.claude,.agents}/skills or ~/.claude/skills. That dir is the
+// real repo root (or HOME) plus fixed segments, each lstat'd a real directory: a symlinked component
+// below the root refuses the delete, and no mkdir or link is made through one.
+// Exit 0 on success, 1 when there is no teams/ here, 2 on an unknown flag.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -39,26 +45,56 @@ function isDir(p) { try { return fs.statSync(p).isDirectory(); } catch { return 
 function isFile(p) { try { return fs.statSync(p).isFile(); } catch { return false; } }
 function samePath(a, b) { return !!a && !!b && (WIN ? a.toLowerCase() === b.toLowerCase() : a === b); }
 
-// Remove a symlink or junction, never what it points to. Works on broken links too.
-function removeLink(link) {
-  const st = lstat(link);
-  if (!st) return false;
-  if (!st.isSymbolicLink()) throw new Error(`${link} is not a link; left alone`);
-  try { fs.unlinkSync(link); }
-  catch (e) {
-    if (e.code !== "EPERM" && e.code !== "EISDIR") throw e;
-    fs.rmdirSync(link); // non-recursive: removes a junction, refuses a real directory
+// a skill name from a list file: one path segment, so a link built from it stays in its skills dir
+const validName = (name) => typeof name === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name);
+
+// root (resolved once) joined with segs, every component below root lstat'd a real directory, never a
+// link; make creates a missing one. null when any is a link, not a directory, or missing (#13).
+function ownDir(root, segs, make = false) {
+  let d = real(root);
+  if (!d) return null;
+  for (const s of segs) {
+    d = path.join(d, s);
+    if (make && !lstat(d)) { try { fs.mkdirSync(d); } catch {} }
+    const st = lstat(d);
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) return null;
   }
-  return true;
+  return d;
 }
 
-// Point link at the directory target. False if a real file or directory is in the way.
-function linkDir(target, link) {
+// Remove a symlink or junction, never what it points to, and only when its real parent is exactly
+// ownDir(root, segs); anything else is refused with a warning. Works on broken links too; never throws.
+function removeLink(link, root, segs) {
+  const st = lstat(link);
+  if (!st) return false;
+  const parent = real(path.dirname(path.resolve(link)));
+  const dir = root && segs ? ownDir(root, segs) : null;
+  if (!st.isSymbolicLink() || !dir || !parent || !samePath(parent, dir)) {
+    const where = root && segs ? path.join(root, ...segs) : "a known dir";
+    console.error(`refused  ${link} (${st.isSymbolicLink() ? `not a link directly in ${where}, or a link on the way` : "not a link"}; left alone)`);
+    return false;
+  }
+  try {
+    try { fs.unlinkSync(link); }
+    catch (e) {
+      if (e.code !== "EPERM" && e.code !== "EISDIR") throw e;
+      fs.rmdirSync(link); // non-recursive: removes a junction, refuses a real directory
+    }
+    return true;
+  } catch (e) {
+    console.error(`warning: ${link} not removed: ${e.message}`);
+    return false;
+  }
+}
+
+// Point link at the directory target. False if a real file or directory is in the way, or if the
+// old link could not be removed. remove(link) does the removal; without one, nothing is removed.
+function linkDir(target, link, remove = () => false) {
   const st = lstat(link);
   if (st && !st.isSymbolicLink()) return false;
   if (st) {
     if (samePath(real(link), real(target))) return true;
-    removeLink(link);
+    if (!remove(link)) return false;
   }
   fs.mkdirSync(path.dirname(link), { recursive: true });
   fs.symlinkSync(target, link, WIN ? "junction" : "dir");
@@ -80,7 +116,7 @@ function readList(file) {
 }
 
 function listFiles(dir) {
-  return ["required.txt", "skills.txt"].map((f) => path.join(dir, f)).filter(isFile);
+  return ["required.txt", "skills.txt"].flatMap((f) => { const p = path.join(dir, f); return isFile(p) ? [p] : []; });
 }
 
 // sha256 over relative path + content of every file; must stay byte-identical to the
@@ -101,19 +137,30 @@ function profiles(teams) {
   return fs.readdirSync(teams).filter((p) => isDir(path.join(teams, p))).sort();
 }
 
-function run({ root = process.cwd(), install = false, confine = false, relock = false, log = console.log } = {}) {
+// remove(link, root, segs) does every removal: removeLink by default; install.js passes its own guard.
+// A team skills dir is used only when ownDir(root, teams/<p>/<d>) holds: a link on the way skips it.
+function run({ root = process.cwd(), install = false, confine = false, relock = false, log = console.log, remove = removeLink } = {}) {
   const teams = path.join(root, "teams");
   if (!isDir(teams)) throw new Error("no teams/ here; run from the repo root");
   const missing = [];
   const linked = [];
+  const homeSkills = [".claude", "skills"];
   for (const p of profiles(teams)) {
     const dir = path.join(teams, p);
     const lists = listFiles(dir);
     if (!lists.length) continue;
-    for (const d of SKILL_DIRS) fs.mkdirSync(path.join(dir, d), { recursive: true });
+    const dirs = [];
+    for (const d of SKILL_DIRS) {
+      const segs = ["teams", p, ...d.split(path.sep)];
+      const own = ownDir(root, segs, true);
+      if (own) dirs.push({ d, segs, own });
+      else console.error(`teams/${p}/${d.split(path.sep).join("/")} is a link or has one on the way; refused, left alone`);
+    }
+    if (!dirs.length) { log(`teams/${p} -> 0 skills linked`); continue; }
     let n = 0;
     for (const [source, name] of lists.flatMap(readList)) {
       if (!name) { console.error(`teams/${p}: line needs '<owner/repo> <skill>': ${source}`); continue; }
+      if (!validName(name)) { console.error(`teams/${p}: skill name ${JSON.stringify(name)} is not one path segment; skipped`); continue; }
       let src = findSrc(name);
       if (!src && install) {
         spawnSync(WIN ? "npx.cmd" : "npx", ["-y", "skills", "add", source, "--skill", name, "-g", "-y", "-a", "claude-code"],
@@ -121,13 +168,13 @@ function run({ root = process.cwd(), install = false, confine = false, relock = 
         src = findSrc(name);
       }
       if (!src) { missing.push(`${p}: npx skills add ${source} --skill ${name} -g -y`); continue; }
-      const blocked = SKILL_DIRS.filter((d) => !linkDir(src, path.join(dir, d, name)));
-      for (const d of blocked) console.error(`teams/${p}/${d.split(path.sep).join("/")}/${name} is a real directory, not a link; left alone`);
-      if (blocked.length === SKILL_DIRS.length) continue;
+      const blocked = dirs.filter(({ segs, own }) => !linkDir(src, path.join(own, name), (l) => remove(l, root, segs)));
+      for (const { d } of blocked) console.error(`teams/${p}/${d.split(path.sep).join("/")}/${name} is a real directory or a link that could not be replaced; left alone`);
+      if (blocked.length === dirs.length) continue;
       n++;
       linked.push({ name, source, src });
-      const g = path.join(HOME, ".claude", "skills", name);
-      if (confine && !OURS.has(name) && lstat(g) && lstat(g).isSymbolicLink()) removeLink(g);
+      const g = path.join(HOME, ...homeSkills, name);
+      if (confine && !OURS.has(name) && lstat(g) && lstat(g).isSymbolicLink()) remove(g, HOME, homeSkills);
     }
     log(`teams/${p} -> ${n} skills linked`);
   }
@@ -160,7 +207,7 @@ function run({ root = process.cwd(), install = false, confine = false, relock = 
   return { linked: linked.length, missing: missing.length };
 }
 
-module.exports = { WIN, SKILL_DIRS, lstat, real, isDir, isFile, samePath, removeLink, linkDir, readList, listFiles, profiles, hashDir, run };
+module.exports = { WIN, SKILL_DIRS, lstat, real, isDir, isFile, samePath, validName, ownDir, removeLink, linkDir, readList, listFiles, profiles, hashDir, run };
 
 if (require.main === module) {
   const opt = {};

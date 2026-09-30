@@ -14,7 +14,7 @@ const re = new RegExp(`^(${types})(\\([a-z0-9._/-]+\\))?!?: [A-Za-z][^\\n]*$`);
 if (/^(Merge|Revert|fixup!|squash!|amend!) /.test(subject)) process.exit(0);
 if (!re.test(subject)) fail(`subject must be "<type>(<scope>): lowercase imperative" (types: ${types})`);
 if (subject.length > 72) fail("subject over 72 chars");
-if (/\.$/.test(subject)) fail("no trailing period");
+if (subject.endsWith(".")) fail("no trailing period");
 if (lines[1] && lines[1].trim() !== "") fail("blank line required after subject");
 for (const l of lines.slice(2)) if (l.length > 72 && !/https?:\/\//.test(l)) fail("body line over 72 chars");
 

@@ -12,7 +12,7 @@ A brief carries pointers (issue, `file:line`, command), never raw logs or long o
 
 ## Worker
 ```
-Ticket #<n> (gh issue view <n> --json body -q .body), team <team>, worktree <absolute path>, branch hive/<run>-<id>, scratch key <run>-<id>. Nothing outside this ticket exists.
+Ticket #<n> (gh issue view <n> --json body -q .body), team <team>, worktree <absolute path>, branch proteus/<run>-<id>, scratch key <run>-<id>. Nothing outside this ticket exists.
 Work only in the worktree: every shell call runs with it as the working directory (the shell tool's workdir where it has one), every command starts with the tool it runs (`git commit …`, never `cd <wt> && git …` or `git -C`), every edit names a path under it.
 Contract (committed, don't change it): <file:line pointers>
 Check: <file::name or command>
@@ -23,21 +23,21 @@ Read teams/<team>/PROFILE.md first, teams/<team>/CRAFT.md if it exists, CONVENTI
 Code: run /implement (drives /tdd at the seam, ends with /code-review). Otherwise: the team's procedure from PROFILE.md. Everything you produce is reproducible from the repo: scripts and source in owned paths, never a file only in out/, /tmp, or a GUI session. Probes print path, hash or size, and count of what they opened.
 Green = the check, the team's green adds, and every repo gate (<gate commands>) clean on owned paths.
 Two retries after first red. Third red → comment `RED` + `git diff <fork>` + exact failing output on the issue and stop. Never restart, never widen.
-Commit per references/commits.md: Conventional Commits, terse, no Co-Authored-By or AI trailer; the commit-msg hook rejects anything else, never bypass it with --no-verify. Push the branch, `gh pr create --base hive/<run> --fill`.
+Commit per references/commits.md: Conventional Commits, terse, no Co-Authored-By or AI trailer; the commit-msg hook rejects anything else, never bypass it with --no-verify. Push the branch, `gh pr create --base proteus/<run> --fill`.
 Done → one comment on the issue: `DONE #<n>` / files / checks passed with their output lines / evidence links / one-line note.
 Long jobs, report-once and scratch rules as above. CONTEXT.md vocabulary. Caveman full. Ponytail full.
 ```
 
 ## Contracts worker (step 3, one per team in the wave, sequential)
 ```
-Run <run>, branch hive/<run>, team <team>, tickets #<n>, #<n>, …, scratch key <run>. No worktree, no PR. Every command starts with the tool it runs (`git commit …`, never `cd … && git …` or `git -C`).
+Run <run>, branch proteus/<run>, team <team>, tickets #<n>, #<n>, …, scratch key <run>. No worktree, no PR. Every command starts with the tool it runs (`git commit …`, never `cd … && git …` or `git -C`).
 Per ticket: `gh issue view <n> --json body -q .body` holds the interface and the check (name, input, expected result). Commit exactly those: code gets signature stubs that compile and throw/`todo!()`/`raise NotImplementedError` plus the red test; other deliverables get the check script and whatever stub makes it runnable. No behaviour, no helpers, no extras.
 Show each check red twice and paste both outputs on the issue:
  1. on the missing work: it fails on its assertion or the not-implemented stub, never on an import, type, syntax, or missing-file error;
  2. on a deliberately broken input (a copy with the property the check guards removed or wrong; for binaries, a probe copy made from the scripts, never the shared original): it fails and names what is wrong.
 A check that stays green on broken input measures nothing: rewrite it until it goes red. Its first output line prints the path, hash or size, and count of what it opened.
 Can't be written as given → `gh issue comment <n> --body "CONTRACT-UNCLEAR: <what>"`, skip that ticket, continue.
-One commit per ticket, `test(<scope>): contract for #<n>`, per references/commits.md. Push hive/<run>.
+One commit per ticket, `test(<scope>): contract for #<n>`, per references/commits.md. Push proteus/<run>.
 Done → per ticket one line on its issue: `CONTRACT #<n> <stub> <check> red-on-missing red-on-broken`.
 Long jobs, report-once and scratch rules as above. CONTEXT.md vocabulary. CONVENTIONS.md applies. Caveman full. Ponytail full.
 ```
@@ -58,13 +58,13 @@ Long jobs, report-once and scratch rules as above. Caveman lite.
 
 ## Guide (human review gate)
 ```
-Run <run>, milestone <name>, mode <attended|unattended>. Tickets: #<n>, ... Diff: <merge-base>..hive/<run>. QA: WAVE-GREEN. Gates: <commands>. Debt issue: #<d>. Scratch key: <run>.
+Run <run>, milestone <name>, mode <attended|unattended>. Tickets: #<n>, ... Diff: <merge-base>..proteus/<run>. QA: WAVE-GREEN. Gates: <commands>. Debt issue: #<d>. Scratch key: <run>.
 Open the review issue with brief, evidence, and the open debt lines per your agent instructions, post REVIEW <milestone> <url> to the task, exit.
 ```
 
 ## QA (wave | milestone | close)
 ```
-Run <run>, branch hive/<run>, mode <wave|milestone|close>. Tickets: #<n>, … Merge-base: <sha>. Gates: <commands>. Debt issue: #<d>. Scratch key: <run>.
+Run <run>, branch proteus/<run>, mode <wave|milestone|close>. Tickets: #<n>, … Merge-base: <sha>. Gates: <commands>. Debt issue: #<d>. Scratch key: <run>.
 Follow teams/qa/PROFILE.md for that mode. Also: a clean rebuild of every deliverable from the branch alone reproduces the merged evidence. One verdict line; findings as issue comments or new issues per the profile. Fix nothing.
 ```
 
@@ -77,4 +77,4 @@ Skills from skills.sh and installed plugins, ranked by installs and fit to this 
 ```
 
 ## Lead pre-dispatch check
-Every ticket is a tracker issue with milestone, `profile:<team>` from `ROUTING.md`, difficulty. Owned paths inside the team's `Owns`. Contract and check committed per ticket, each shown red twice. No shared file owners in this wave, no shared binary with two writers. Hotspot tickets merged. The spawn names `top` or `mid` from `models=` (your own model when `models=unknown`); never a missing, higher, once-per-project, or under-floor model. `CONVENTIONS.md` exists and its taste docs are in the brief. The milestone's debt issue exists. No human review open. `hive/<run>` protected. Each worktree prepared by `proteus-worktree.js`. Stall check armed. I produced no deliverable and resolved no conflict; every fix I decided went out as a ticket or a `BACK-TO-WORKER`.
+Every ticket is a tracker issue with milestone, `profile:<team>` from `ROUTING.md`, difficulty. Owned paths inside the team's `Owns`. Contract and check committed per ticket, each shown red twice. No shared file owners in this wave, no shared binary with two writers. Hotspot tickets merged. The spawn names `top` or `mid` from `models=` (your own model when `models=unknown`); never a missing, higher, once-per-project, or under-floor model. `CONVENTIONS.md` exists and its taste docs are in the brief. The milestone's debt issue exists. No human review open. `proteus/<run>` protected. Each worktree prepared by `proteus-worktree.js`. Stall check armed. I produced no deliverable and resolved no conflict; every fix I decided went out as a ticket or a `BACK-TO-WORKER`.

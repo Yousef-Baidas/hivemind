@@ -23,7 +23,7 @@ function run(main) {
   process.stdin.on("end", async () => {
     let raw = {};
     try { raw = JSON.parse(input) || {}; } catch {}
-    try { const ad = harness(); await main(ad.event(raw), ad); } catch (e) { if (process.env.PROTEUS_DEBUG) process.stderr.write(`hive hook: ${e.stack}\n`); }
+    try { const ad = harness(); await main(ad.event(raw), ad); } catch (e) { if (process.env.PROTEUS_DEBUG) process.stderr.write(`proteus hook: ${e.stack}\n`); }
     // pipes are async on macOS: exit only once stdout has drained
     process.stdout.write("", () => process.exit(0));
   });
@@ -63,7 +63,158 @@ function gitCommonDir(root) {
 // main checkout root: the common dir's parent when it is a .git dir (null for bare repos)
 const mainRoot = (common) => (common && path.basename(common) === ".git" ? path.dirname(common) : null);
 
-const hiveDir = (common) => path.join(common, "hive");
+const stateDir = (common) => path.join(common, "proteus");
+
+// a run's names: its branch prefix, evidence prefix, labels, and the sibling folder its worker worktrees use
+const CURRENT = { branch: "proteus/", evidence: "proteus-evidence/", label: "proteus", log: "proteus-log", review: "proteus-review", debt: "proteus-debt", question: "proteus-question", worktrees: "-proteus" };
+
+// legacy-hive:start
+// hivemind, the old name (#6): a run opened before the rename keeps these names until it closes, and its
+// state dir moves into stateDir. Every legacy name the hooks know is here; the rest import it.
+const LEGACY = { branch: "hive/", evidence: "hive-evidence/", label: "hive", log: "hive-log", review: "hive-review", debt: "hive-debt", question: "hive-question", worktrees: "-hive", state: "hive", owned: "hive-owned" };
+const legacyStateDir = (common) => path.join(common, LEGACY.state);
+// the worker worktree folder a legacy run used, beside the checkout
+const legacyWorktreeDir = (root) => { const abs = path.resolve(root); return path.join(path.dirname(abs), path.basename(abs) + LEGACY.worktrees); };
+
+// worktrees git still has registered under legacyWorktreeDir(root): <common>/worktrees/*/gitdir, no git call
+function legacyWorktrees(root) {
+  const common = gitCommonDir(root);
+  const dir = legacyWorktreeDir(root);
+  const out = [];
+  let ids = [];
+  try { ids = fs.readdirSync(path.join(common, "worktrees")); } catch { return out; }
+  for (const id of ids) {
+    let wt;
+    try { wt = path.dirname(path.resolve(fs.readFileSync(path.join(common, "worktrees", id, "gitdir"), "utf8").trim())); } catch { continue; }
+    const r = path.relative(dir, wt);
+    if (r && !r.startsWith("..") && !path.isAbsolute(r)) out.push(wt);
+  }
+  return out;
+}
+
+const realOr = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+const within = (dir, p) => { const r = path.relative(dir, p); return r === "" || (r !== ".." && !r.startsWith(".." + path.sep) && !path.isAbsolute(r)); };
+
+// every worktree git has registered, as real paths: <common>/worktrees/*/gitdir, no git call
+function registeredWorktrees(common) {
+  let ids = [];
+  try { ids = fs.readdirSync(path.join(common, "worktrees")); } catch { return []; }
+  const out = [];
+  for (const id of ids) {
+    try { out.push(realOr(path.dirname(path.resolve(fs.readFileSync(path.join(common, "worktrees", id, "gitdir"), "utf8").trim())))); } catch {}
+  }
+  return out;
+}
+
+// something is at the target now: the entry stays where it is (kept), never replaces it
+const TAKEN = new Set(["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR"]);
+// a filesystem with no hard links: copy instead, still refusing an existing target
+const NO_LINK = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV", "EMLINK"]);
+
+// one entry into a spot found empty. A file goes by link then unlink and a symlink is recreated (never
+// followed), so a file that appeared there meanwhile fails with EEXIST instead of being replaced; a
+// directory is renamed, which a non-empty target refuses. If the source cannot be unlinked, the copy goes.
+function moveEntry(s, d, st) {
+  if (st.isDirectory()) { fs.renameSync(s, d); return; }
+  if (st.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(s), d);
+  else {
+    try { fs.linkSync(s, d); } catch (e) {
+      if (!NO_LINK.has(e.code)) throw e;
+      fs.copyFileSync(s, d, fs.constants.COPYFILE_EXCL);
+    }
+  }
+  try { fs.unlinkSync(s); } catch (e) { try { fs.unlinkSync(d); } catch {} throw e; }
+}
+
+// an append-only log on both sides: the legacy lines first, then the current file's lines not among them,
+// written to a temp file beside the current one and renamed over it; the legacy file goes only after that.
+// A line appended to the current file meanwhile aborts the pass (a rerun merges again, each line once).
+function mergeLog(s, d) {
+  const old = fs.readFileSync(s, "utf8").split("\n").filter(Boolean);
+  const cur = fs.readFileSync(d, "utf8");
+  const seen = new Set(old);
+  const all = [...old, ...cur.split("\n").filter((l) => l && !seen.has(l))];
+  const tmp = `${d}.${process.pid}.${Date.now()}.merge.tmp`;
+  fs.writeFileSync(tmp, all.length ? all.join("\n") + "\n" : "", { flag: "wx" });
+  try {
+    if (fs.readFileSync(d, "utf8") !== cur) throw Object.assign(new Error("appended during the merge"), { code: "EAGAIN" });
+    fs.renameSync(tmp, d);
+  } catch (e) { try { fs.unlinkSync(tmp); } catch {} throw e; }
+  fs.unlinkSync(s); // a regular file (lstat) in a tree whose every dir was lstat-checked under the legacy dir
+}
+
+// move legacyStateDir's contents into stateDir; the legacy dir goes once empty. Paths are relative to it:
+// moved: now in stateDir; merged: a *.jsonl log on both sides, appended into stateDir's (older lines first);
+// kept: another file already in stateDir, never overwritten; held: a worktree git has registered, left where
+// git has it; failed: "<path> (<code>)", unreadable or not movable now (a rerun retries). dry: only report.
+function migrateState(common, dry) {
+  const res = { moved: [], merged: [], kept: [], held: [], failed: [] };
+  const from = common && legacyStateDir(common);
+  let top = null;
+  try { top = from && fs.lstatSync(from); } catch {}
+  if (!top || !top.isDirectory()) return res;
+  const wts = registeredWorktrees(common);
+  const fail = (r, e) => res.failed.push(`${r} (${(e && e.code) || "error"})`);
+  const walk = (src, dst, rel) => {
+    let names = [];
+    try { names = fs.readdirSync(src).sort(); } catch (e) { if (rel) fail(rel, e); return; }
+    for (const n of names) {
+      const s = path.join(src, n), d = path.join(dst, n), r = rel ? `${rel}/${n}` : n;
+      let ss, ds = null;
+      try { ss = fs.lstatSync(s); } catch (e) { fail(r, e); continue; } // gone or unreachable since the listing
+      try { ds = fs.lstatSync(d); } catch {}
+      const real = ss.isDirectory() && wts.length ? realOr(s) : "";
+      if (real && wts.includes(real)) { res.held.push(r); continue; }
+      if (real && wts.some((w) => within(real, w))) {
+        // a worktree is inside: move the rest around it
+        if (ds && !ds.isDirectory()) { res.kept.push(r); continue; }
+        if (!dry && !ds) try { fs.mkdirSync(d, { recursive: true }); } catch (e) { fail(r, e); continue; }
+        walk(s, d, r);
+        if (!dry) try { fs.rmdirSync(s); } catch {}
+      } else if (!ds) {
+        if (dry) { res.moved.push(r); continue; }
+        try { fs.mkdirSync(dst, { recursive: true }); moveEntry(s, d, ss); res.moved.push(r); } catch (e) { if (TAKEN.has(e.code)) res.kept.push(r); else fail(r, e); }
+      } else if (ds.isDirectory() && ss.isDirectory()) {
+        walk(s, d, r);
+        if (!dry) try { fs.rmdirSync(s); } catch {}
+      } else if (ds.isFile() && ss.isFile() && n.endsWith(".jsonl")) {
+        if (dry) { res.merged.push(r); continue; }
+        try { mergeLog(s, d); res.merged.push(r); } catch (e) { fail(r, e); }
+      } else res.kept.push(r);
+    }
+  };
+  walk(from, stateDir(common), "");
+  if (!dry) try { fs.rmdirSync(from); } catch {}
+  return res;
+}
+// legacy-hive:end
+
+const SCHEMES = [CURRENT, LEGACY];
+// the naming scheme a run or worker branch is on, null for any other branch
+const schemeOf = (branch) => SCHEMES.find((s) => String(branch).startsWith(s.branch)) || null;
+// the run (or <run>-<id>) a branch names, without its prefix
+const runName = (branch) => { const s = schemeOf(branch); return s ? String(branch).slice(s.branch.length) : String(branch); };
+
+// every run and worker branch under both schemes: loose refs and packed-refs, no git call
+function runRefs(common) {
+  const out = new Set();
+  if (!common) return [];
+  let packed = "";
+  try { packed = fs.readFileSync(path.join(common, "packed-refs"), "utf8"); } catch {}
+  for (const s of SCHEMES) {
+    const dir = path.join(common, "refs", "heads", s.branch.slice(0, -1));
+    try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) if (e.isFile()) out.add(s.branch + e.name); } catch {}
+    const esc = s.branch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    for (const m of packed.matchAll(new RegExp(`^[0-9a-f]+ refs/heads/(${esc}[^/\\s]+)$`, "gm"))) out.add(m[1]);
+  }
+  return [...out].sort();
+}
+
+// run branches only: <prefix><run>-<id> is a worker branch of <prefix><run>
+function runBranches(common) {
+  const refs = runRefs(common);
+  return refs.filter((b) => !refs.some((a) => a !== b && b.startsWith(a + "-")));
+}
 
 function readJSON(file, dflt) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return dflt; }
@@ -97,11 +248,8 @@ function gitRoot(dir) {
   }
 }
 
-// a hive/* branch exists: loose refs or packed-refs, no git call
-function runOpen(common) {
-  try { if (fs.readdirSync(path.join(common, "refs", "heads", "hive")).length) return true; } catch {}
-  try { return /^\S+ refs\/heads\/hive\//m.test(fs.readFileSync(path.join(common, "packed-refs"), "utf8")); } catch { return false; }
-}
+// a run is open: a run or worker branch exists under either scheme
+const runOpen = (common) => runRefs(common).length > 0;
 
 // owned-path glob: ** any depth, * within a segment, trailing / means the whole directory
 function ownedMatch(glob, rel) {
@@ -111,10 +259,10 @@ function ownedMatch(glob, rel) {
 }
 
 // a worktree the lead dispatched a worker into: it lists the ticket's owned paths
-// a worktree dispatched before the rename carries hive-owned; read it until that run merges
+// a worktree dispatched before the rename carries the legacy list; read it until that run merges
 const ownedFile = (wt) => {
   const f = harness().ownedFile(wt);
-  const old = path.join(path.dirname(f), "hive-owned");
+  const old = path.join(path.dirname(f), LEGACY.owned);
   return !fs.existsSync(f) && fs.existsSync(old) ? old : f;
 };
 
@@ -185,9 +333,9 @@ function syncText(a, dst) {
   return true;
 }
 
-// The human's inbox: open needs-human issues, cached in <common>/hive/inbox.json as
+// The human's inbox: open needs-human issues, cached in <common>/proteus/inbox.json as
 // {at, questions:[{n,title}], reviews:[{n,title}]}. null when there is no cache.
-const inboxFile = (common) => path.join(hiveDir(common), "inbox.json");
+const inboxFile = (common) => path.join(stateDir(common), "inbox.json");
 function readInbox(common) {
   const c = readJSON(inboxFile(common), null);
   return c && Array.isArray(c.questions) && Array.isArray(c.reviews) ? c : null;
@@ -212,7 +360,7 @@ function rungOf(ladder, name) {
 // the session's model, as the harness finds it
 const leadModel = (ev) => harness().sessionModel(ev);
 // the model SessionStart reported, kept by the autostart for when the transcript tail has no reply
-const leadFile = (root) => { const c = gitCommonDir(root); return c ? path.join(hiveDir(c), "lead-model.json") : null; };
+const leadFile = (root) => { const c = gitCommonDir(root); return c ? path.join(stateDir(c), "lead-model.json") : null; };
 function saveLead(ev, root) {
   const f = leadFile(root);
   if (f && ev.model && ev.session) writeJSON(f, { session: ev.session, model: ev.model });
@@ -264,14 +412,15 @@ function refreshInbox(root, common, timeout = 10000) {
   if (!Array.isArray(list)) return null;
   const has = (i, name) => (i.labels || []).some((l) => l && l.name === name);
   const item = (i) => ({ n: i.number, title: String(i.title || "") });
-  const inbox = { at: new Date().toISOString(), questions: list.filter((i) => has(i, "hive-question")).map(item), reviews: list.filter((i) => has(i, "hive-review")).map(item) };
+  const inbox = { at: new Date().toISOString(), questions: list.filter((i) => SCHEMES.some((s) => has(i, s.question))).map(item), reviews: list.filter((i) => SCHEMES.some((s) => has(i, s.review))).map(item) };
   writeJSON(inboxFile(common), inbox);
   return inbox;
 }
 
 module.exports = {
   readInbox, refreshInbox, inboxFile,
-  run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, hiveDir, readJSON, writeJSON,
+  run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, stateDir, readJSON, writeJSON,
+  CURRENT, LEGACY, SCHEMES, schemeOf, runName, runRefs, runBranches, legacyStateDir, legacyWorktreeDir, legacyWorktrees, migrateState,
   configFile, proteusConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
   workerDenial, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, syncText, WAIT_MSG, EDIT_LAST_MSG,
 };

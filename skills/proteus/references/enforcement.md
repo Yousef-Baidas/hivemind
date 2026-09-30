@@ -4,10 +4,10 @@ Rules in prompts drift. These make the important ones mechanical. Templates ship
 
 ## 1. CI on every ticket PR + branch protection
 
-Scaffold ticket: copy `teams/templates/ci/hive-gates.yml` to `.github/workflows/`, replace every `EDIT` line with the gate commands from `## Learned`, commit. Then, per run, right after `git push -u origin hive/<run>`:
+Scaffold ticket: copy `teams/templates/ci/proteus-gates.yml` to `.github/workflows/`, replace every `EDIT` line with the gate commands from `## Learned`, commit. Then, per run, right after `git push -u origin proteus/<run>`:
 
 ```
-gh api -X PUT "repos/{owner}/{repo}/branches/hive%2F<run>/protection" \
+gh api -X PUT "repos/{owner}/{repo}/branches/proteus%2F<run>/protection" \
   --input - <<'EOF'
 {"required_status_checks":{"strict":true,"contexts":["gates"]},
  "required_pull_request_reviews":null,
@@ -15,7 +15,7 @@ gh api -X PUT "repos/{owner}/{repo}/branches/hive%2F<run>/protection" \
 EOF
 ```
 
-Now no PR merges into `hive/<run>` without the `gates` check green. Required reviews are not set: worker, verifier, and lead share one `gh` login, and GitHub refuses `--approve` on your own PR, so the verifier's `MERGE` is a review comment and a record, not a lock. Verifier reads `gh pr checks <pr> --json name,state` instead of re-running the suite; it re-runs only what it needs to reproduce a finding, or the whole suite when the checks list is empty.
+Now no PR merges into `proteus/<run>` without the `gates` check green. Required reviews are not set: worker, verifier, and lead share one `gh` login, and GitHub refuses `--approve` on your own PR, so the verifier's `MERGE` is a review comment and a record, not a lock. Verifier reads `gh pr checks <pr> --json name,state` instead of re-running the suite; it re-runs only what it needs to reproduce a finding, or the whole suite when the checks list is empty.
 
 The PUT fails on a private repo on GitHub Free (403) and `gates` never reports when Actions is disabled. Either → write `protection: none` under `AGENTS.md ## Learned` once, tell the human once, continue with prompt-enforced gates; the verifier then runs the suite itself. Delete the protection with `gh api -X DELETE …/protection` at close before deleting the branch.
 
@@ -31,7 +31,7 @@ It writes the owned-paths file `<wt>/.claude/proteus-owned` (`.codex/proteus-own
 
 ## 3. lefthook + commit-msg check
 
-Scaffold ticket: install lefthook (`npm i -D lefthook` / `pip install lefthook` / `cargo binstall lefthook` / `pacman -S lefthook` / `brew install lefthook`), copy `teams/templates/lefthook.yml` to the root, fill the `EDIT` lines, `lefthook install`. lefthook and `hive-gates.yml` run `node teams/templates/hooks/commit-msg.js`, so `teams/templates/` is committed. The commit-msg check rejects non-Conventional subjects, >72 chars, and any AI attribution trailer. CI runs the same check on every commit in the PR, so a worker that skipped hooks still fails.
+Scaffold ticket: install lefthook (`npm i -D lefthook` / `pip install lefthook` / `cargo binstall lefthook` / `pacman -S lefthook` / `brew install lefthook`), copy `teams/templates/lefthook.yml` to the root, fill the `EDIT` lines, `lefthook install`. lefthook and `proteus-gates.yml` run `node teams/templates/hooks/commit-msg.js`, so `teams/templates/` is committed. The commit-msg check rejects non-Conventional subjects, >72 chars, and any AI attribution trailer. CI runs the same check on every commit in the PR, so a worker that skipped hooks still fails.
 
 ## 4. semgrep in the security verifier
 
@@ -76,15 +76,15 @@ Lead (main checkout):
 
 - `proteus-autostart.js` (`SessionStart`): prints the skill body and a `proteus-state` line from local files, so every session opens as the lead at "Session start" with no command typed. Also: `doc-bloat`, `lessons`, `proteus-src`, `proteus-update`, `scratch` (over 1 GB), `context-mode=missing` (plugin not installed and enabled) in the state line; the run-log tail at startup with an open run and after a compaction; after a compaction, the last ten human messages verbatim. Once a day it fetches the Proteus checkout in the background; with `autoUpdate` on it fast-forwards it, and the behind-count goes to `~/.claude/proteus.json` for the status line. While the tour is pending (`toured` in that file unset, or a `feat` commit since it) it adds one offer line at up to three session starts, then records it declined. Each session it starts `proteus-scratch.js --sweep --stale` detached.
 - `proteus-lead-guard.js` (`PreToolUse`): on the main thread refuses edits (`Edit`/`Write`, Codex `apply_patch`) inside the repo except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, `docs/adr/*.md`, `docs/lessons/*.md`; refuses a spawn (`Agent`, Codex `spawn_agent`) with no model, a model above the lead's, a once-per-project model (Fable by default; the lead is its one instance), or one under the floor (Haiku by default), per the ladder in `proteus-lib.js` (`models` in `~/.claude/proteus.json`, a `models:` line in `AGENTS.md`); refuses new spawns at `PROTEUS_HANDOFF_HARD` context; refuses `gh … --edit-last` (one account posts for every agent, so an edit can overwrite a ruling); refuses reading an image (`Read`, Codex `view_image`; png, jpg, webp, exr, …) unless the human's latest message names the file, because each costs the lead ~1.5k tokens and judging renders is the verifier's or the human's job. Inside subagents it refuses `run_in_background` Bash, `Monitor` (neither visible on Codex), `--edit-last`, and edits outside the worktree's owned paths (§2). Shell file writes are not caught; rule 1 of the skill covers them.
-- `proteus-journal.js` (`UserPromptSubmit`): appends every human message to `.git/hive/journal.jsonl` (last 500), reminds the lead to log decisions, names open question issues at most every ten minutes, and meters context (`stack.md`).
+- `proteus-journal.js` (`UserPromptSubmit`): appends every human message to `.git/proteus/journal.jsonl` (last 500), reminds the lead to log decisions, names open question issues at most every ten minutes, and meters context (`stack.md`).
 - `proteus-lessons.js` (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`): trigger-based lesson recall (`lessons.md`).
 - `proteus-scratch.js` (`PreToolUse`, `PostToolUse`, `PostToolUseFailure` on `Bash`, subagents included): ledgers each new entry directly in the temp dir that this user owns and the command or its output names; `--path`, `--sweep` and `--size` from the command line (`operations.md`). Only a sweep deletes, and only what the ledger or the scratch dir holds.
 - `proteus-stall.js` (`SubagentStop`, `TeammateIdle`; Codex `SubagentStop` only): refuses a stop that ends waiting on a background job instead of reporting (`operations.md`).
-- `proteus-statusline.js` (status line): appends `hive: N questions · M reviews` to your own status line while any are open; it reads a cache and refreshes it in the background at most once a minute. Registered only when the project has no `statusLine` of its own. Codex has no scriptable status line; `inbox=` in `proteus-state` carries the count.
+- `proteus-statusline.js` (status line): appends `proteus: N questions · M reviews` to your own status line while any are open; it reads a cache and refreshes it in the background at most once a minute. Registered only when the project has no `statusLine` of its own. Codex has no scriptable status line; `inbox=` in `proteus-state` carries the count.
 - Not hooks: `proteus-status.js` (the `status` command), `proteus-inbox.js` (`--refresh` lists open questions and reviews; the `questions` command), `proteus-worktree.js` (§2).
 
 Worker worktree (written by `proteus-worktree.js`, a backup for sessions opened inside a worktree): `proteus-owned-paths.js` (§2), `proteus-worker-guard.js` (no `run_in_background`, no `Monitor`, no `--edit-last`), `proteus-lessons.js`, `proteus-scratch.js`, `proteus-stall.js` on `Stop`.
 
 No hook reads Claude Code's hook JSON itself. `proteus-harness.js` loads the adapter named by `PROTEUS_HARNESS` (`proteus-harness-<name>.js`, default and fallback `claude`), which turns the CLI's input into one Proteus event, answers for the hook (deny, add context, keep going), reads the transcript, and knows where the CLI keeps settings, agents and worker hooks. `proteus-lib.js` is the part every CLI shares. The event and adapter contract are documented at the top of `proteus-harness.js`. Hooks installed under `.codex/hooks` use the Codex adapter. The default model ladder belongs to the adapter; a CLI without one runs single-model, every spawn on the lead's model, until `models.ladder` is set.
 
-`PROTEUS=0 claude` (`PROTEUS=0 codex`) opens a plain session with none of the lead's hooks: the review session, or the human working by hand. Hook state lives in `<git-common-dir>/hive/` (`journal.jsonl`, `inbox.json`, `lesson-hits.json`, `lead-model.json`, `scratch-ledger.jsonl`, `scratch/`, `scratch-size.json`, lesson and stall caches) and is never committed. `node <Proteus checkout>/install.js --doctor` checks the whole install, `--doctor --fix` repairs what it safely can.
+`PROTEUS=0 claude` (`PROTEUS=0 codex`) opens a plain session with none of the lead's hooks: the review session, or the human working by hand. Hook state lives in `<git-common-dir>/proteus/` (`journal.jsonl`, `inbox.json`, `lesson-hits.json`, `lead-model.json`, `scratch-ledger.jsonl`, `scratch/`, `scratch-size.json`, lesson and stall caches) and is never committed. `node <Proteus checkout>/install.js --doctor` checks the whole install, `--doctor --fix` repairs what it safely can.

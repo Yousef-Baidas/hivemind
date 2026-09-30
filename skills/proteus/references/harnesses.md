@@ -9,7 +9,7 @@ The skill is written in Claude Code's names. On Codex CLI (you spawn with `spawn
 | Project instructions | `CLAUDE.md` (and `AGENTS.md`) | `AGENTS.md` only; `docs-diet.md`'s `CLAUDE.md` rules apply to it |
 | `<hooks>`: hooks and lead scripts | `.claude/hooks` | `.codex/hooks` |
 | Owned-paths file | `<wt>/.claude/proteus-owned` | `<wt>/.codex/proteus-owned` (read-only to the worker's sandbox) |
-| Worktree folder `../<repo>-hive/` | writable | writable because `install.js --project --harness codex` adds it to `[sandbox_workspace_write] writable_roots` in `.codex/config.toml`; `--doctor` checks it |
+| Worktree folder `../<repo>-proteus/` | writable | writable because `install.js --project --harness codex` adds it to `[sandbox_workspace_write] writable_roots` in `.codex/config.toml`; `--doctor` checks it |
 | Lead hook registration | `.claude/settings.local.json` | `.codex/hooks.json` plus `.codex/rules/proteus.rules`; the human trusts the project and approves the hooks in `/hooks` once |
 | Plain session, no lead hooks | `PROTEUS=0 claude` | `PROTEUS=0 codex` |
 | Agent definitions | `.claude/agents/*.md`; a project may pin tools or a model | TOML roles in `$CODEX_HOME/agents`, no model and no tool limits: verifiers stay read-only by instruction only |
@@ -26,7 +26,7 @@ The skill is written in Claude Code's names. On Codex CLI (you spawn with `spawn
 | Shell | `Bash`, `run_in_background` for a background shell | `exec_command` returns after `yield_time_ms` (default 10 s, at most 30 s) with a session id while the command keeps running, with no overall time limit; `write_stdin` with empty input polls it, each poll waiting up to 5 minutes (`background_terminal_max_timeout`). The hooks see none of this, so a command left running past the turn is the background shell the long-jobs rule forbids |
 | Ask the human (the run cannot move) | `AskUserQuestion`, pinned picker | plain numbered questions in chat, one to four, numbered options, recommendation first and marked; wait for the reply (the picker exists only in Plan mode) |
 | Notify | `PushNotification` | none; the chat line and the question or review issue are the notice |
-| Status line | `proteus-statusline.js` shows `hive: N questions · M reviews` | none; `inbox=<q>q/<r>r` in `proteus-state` at session start and the journal's reminder carry it |
+| Status line | `proteus-statusline.js` shows `proteus: N questions · M reviews` | none; `inbox=<q>q/<r>r` in `proteus-state` at session start and the journal's reminder carry it |
 | Stall-check timer | `CronCreate` every 20 minutes | none; `wait_agent` with `timeout_ms: 1200000` (10 s to 1 h, default 30 s) returns early when an agent finishes, else at the timeout; each return without a report is a fire |
 | Hooks that cannot fire | – | failed-tool and teammate-idle events; a background shell is invisible to the hooks, so the long-jobs rule is prompt-only |
 | Model ladder | default `haiku < sonnet < opus < fable`, floor Haiku, Fable once per project | none: `models=unknown`, every spawn names your own model, until `models.ladder` in `~/.claude/proteus.json` or a `models:` line in `AGENTS.md` names the rungs |

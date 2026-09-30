@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// Scratch hygiene: every temp file a hive agent makes is deleted once its ticket or run is done,
-// and nothing the hive did not make is ever touched.
-//   node .claude/hooks/proteus-scratch.js --path <key>       mkdir <git-common-dir>/hive/scratch/<key>/, bump its mtime, print it
+// Scratch hygiene: every temp file a Proteus agent makes is deleted once its ticket or run is done,
+// and nothing Proteus did not make is ever touched.
+//   node .claude/hooks/proteus-scratch.js --path <key>       mkdir <git-common-dir>/proteus/scratch/<key>/, bump its mtime, print it
 //   node .claude/hooks/proteus-scratch.js --sweep <key>      delete scratch/<key>[-*] and the strays keyed <key>[-*]
-//   node .claude/hooks/proteus-scratch.js --sweep --all-done the same for every key whose hive/<key> branch is gone
+//   node .claude/hooks/proteus-scratch.js --sweep --all-done the same for every key whose proteus/<key> branch is gone
 //   node .claude/hooks/proteus-scratch.js --sweep --stale    the autostart's: done and idle 72h, or idle 7 days regardless
 //   node .claude/hooks/proteus-scratch.js --size             MB held in scratch dirs and ledgered strays
-// <key> is a ticket's <run>-<id> (its branch hive/<run>-<id>) or a run's <run>.
+// <key> is a ticket's <run>-<id> (its branch proteus/<run>-<id>) or a run's <run>.
 // As a hook (lead's session, before and after every shell call, failed or not): the first snapshots the
 // top-level names of os.tmpdir(); after the call a new name owned by this user and named in the command or its
-// output is a stray, appended to <common>/hive/scratch-ledger.jsonl with its key (the agent's own --path,
-// the hive/* branch of its cwd, or the one open run). Deletion happens only in --sweep, only for ledgered
+// output is a stray, appended to <common>/proteus/scratch-ledger.jsonl with its key (the agent's own --path,
+// the proteus/* branch of its cwd, or the one open run). Deletion happens only in --sweep, only for ledgered
 // paths and scratch dirs, each re-checked first: same inode, this user, directly in os.tmpdir(), a symlink
 // removed as a link and never followed. A git worktree goes through `git worktree remove --force` and `prune`.
 "use strict";
@@ -34,9 +34,9 @@ function hook(ev) {
   if (ev.tool !== "shell") return;
   const common = lib.gitCommonDir(lib.projectRoot(ev));
   if (!common) return;
-  const hive = lib.hiveDir(common);
+  const store = lib.stateDir(common);
   const id = String(ev.toolUseId || `${ev.session}-${ev.agent || "lead"}`).replace(/[^\w.-]/g, "_");
-  const snap = path.join(hive, "scratch-snap", id);
+  const snap = path.join(store, "scratch-snap", id);
   const tmp = os.tmpdir();
   if (ev.kind === "pre-tool") {
     const names = fs.readdirSync(tmp);
@@ -72,7 +72,7 @@ function hook(ev) {
     }
   }
   if (!rows.length) return;
-  fs.mkdirSync(hive, { recursive: true });
+  fs.mkdirSync(store, { recursive: true });
   fs.appendFileSync(file, rows.map((r) => JSON.stringify(r) + "\n").join(""));
 }
 
@@ -81,7 +81,7 @@ function cli([cmd, arg]) {
     const common = lib.gitCommonDir(process.cwd());
     if (!common) throw new Error("not inside a git repo");
     if (cmd === "--path" && KEY.test(arg || "")) {
-      const dir = path.join(lib.hiveDir(common), "scratch", arg);
+      const dir = path.join(lib.stateDir(common), "scratch", arg);
       fs.mkdirSync(dir, { recursive: true });
       const now = new Date();
       fs.utimesSync(dir, now, now);
@@ -99,7 +99,7 @@ function cli([cmd, arg]) {
 }
 
 function sweep(common, what) {
-  const hive = lib.hiveDir(common);
+  const store = lib.stateDir(common);
   const file = ledgerFile(common);
   const { text, rows } = readLedger(file);
   const now = Date.now();
@@ -126,7 +126,7 @@ function sweep(common, what) {
     out.strays++;
     if (res.worktree) out.worktrees++;
   }
-  const root = path.join(hive, "scratch");
+  const root = path.join(store, "scratch");
   for (const name of realDir(root) ? ls(root) : []) {
     const d = path.join(root, name);
     let st;
@@ -140,7 +140,7 @@ function sweep(common, what) {
   for (const cwd of prune) git(["worktree", "prune"], cwd);
   if (keep.length !== rows.length) writeLedger(file, text, keep);
   // a PreToolUse whose call never ran (denied, interrupted) leaves its snapshot behind
-  const snaps = path.join(hive, "scratch-snap");
+  const snaps = path.join(store, "scratch-snap");
   for (const f of ls(snaps)) { try { const p = path.join(snaps, f); if (now - fs.statSync(p).mtimeMs > 3600e3) fs.unlinkSync(p); } catch {} }
   out.left = size(common, keep);
   return out;
@@ -152,7 +152,7 @@ function removeStray(r, tmpReal, uid, prune) {
   let st;
   try { st = fs.lstatSync(p); } catch { return {}; }
   if (!tmpReal || !same(real(path.dirname(p)), tmpReal)) return { keep: "not directly in os.tmpdir()" };
-  if (r.ino && st.ino !== r.ino) return {}; // replaced since: not the entry the hive made
+  if (r.ino && st.ino !== r.ino) return {}; // replaced since: not the entry Proteus made
   if (uid !== null && st.uid !== uid) return {};
   try {
     if (st.isSymbolicLink()) { fs.unlinkSync(p); return { bytes: 0 }; } // the link, never its target
@@ -193,29 +193,26 @@ function removeWorktree(p, prune) {
   return true;
 }
 
-// a key is done once its hive/<key> branch is gone: `gh pr merge --delete-branch` drops a ticket's,
-// close drops the run's. Unkeyed strays are done when no hive/* branch is left.
+// a key is done once its proteus/<key> branch is gone: `gh pr merge --delete-branch` drops a ticket's,
+// close drops the run's. Unkeyed strays are done when no proteus/* branch is left. A run opened
+// before the rename counts on its legacy branch (lib.runRefs reads both prefixes).
 function doneFn(common) {
-  const branches = hiveBranches(common);
+  const branches = runBranches(common);
   return (key) => (key ? !branches.has(key) : branches.size === 0);
 }
 
-// hive/* branch names without the prefix: loose refs and packed-refs, no git call
-function hiveBranches(common) {
-  const set = new Set(ls(path.join(common, "refs", "heads", "hive")));
-  let packed = "";
-  try { packed = fs.readFileSync(path.join(common, "packed-refs"), "utf8"); } catch {}
-  for (const m of packed.matchAll(/^\S+ refs\/heads\/hive\/([^/\s]+)$/gm)) set.add(m[1]);
-  return set;
+// run and worker branch names without their prefix, either scheme: loose refs and packed-refs, no git call
+function runBranches(common) {
+  return new Set(lib.runRefs(common).map(lib.runName));
 }
 
-// the stray's key: the agent's own --path, else its cwd's hive/* branch, else the one open run, else ""
+// the stray's key: the agent's own --path, else its cwd's proteus/* branch, else the one open run, else ""
 function keyOf(ev, who, rows, common) {
   const bound = rows.filter((r) => r.bind === who).pop();
   if (bound && KEY.test(bound.key)) return bound.key;
   const b = branchOf(ev.cwd || lib.projectRoot(ev));
-  if (b.startsWith("hive/") && KEY.test(b.slice(5))) return b.slice(5);
-  const names = [...hiveBranches(common)];
+  if (lib.schemeOf(b) && KEY.test(lib.runName(b))) return lib.runName(b);
+  const names = [...runBranches(common)];
   const runs = names.filter((b2) => !names.some((a) => a !== b2 && b2.startsWith(a + "-")));
   return runs.length === 1 ? runs[0] : "";
 }
@@ -247,10 +244,10 @@ function named(text, name) {
 
 // bytes in scratch dirs and in the ledgered strays still present; cached for the autostart's state line
 function size(common, rows) {
-  const root = path.join(lib.hiveDir(common), "scratch");
+  const root = path.join(lib.stateDir(common), "scratch");
   let n = realDir(root) ? du(root) : 0;
   for (const r of rows || readLedger(ledgerFile(common)).rows) if (typeof r.path === "string") n += du(r.path);
-  try { lib.writeJSON(path.join(lib.hiveDir(common), "scratch-size.json"), { at: new Date().toISOString(), bytes: n }); } catch {}
+  try { lib.writeJSON(path.join(lib.stateDir(common), "scratch-size.json"), { at: new Date().toISOString(), bytes: n }); } catch {}
   return n;
 }
 
@@ -263,7 +260,7 @@ function du(p) {
   return n;
 }
 
-function ledgerFile(common) { return path.join(lib.hiveDir(common), "scratch-ledger.jsonl"); }
+function ledgerFile(common) { return path.join(lib.stateDir(common), "scratch-ledger.jsonl"); }
 
 function readLedger(file) {
   let text = "";

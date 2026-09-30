@@ -11,7 +11,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { tailLines } = require(path.join(__dirname, "proteus-lib.js"));
+const { tailLines, legacyWorktreeDir, legacyWorktrees } = require(path.join(__dirname, "proteus-lib.js"));
 const claude = require(path.join(__dirname, "proteus-harness-claude.js"));
 
 const name = "codex";
@@ -31,7 +31,7 @@ const KINDS = {
 // Multi-agent v2 prefixes its tools with a namespace ("collaborationspawn_agent" by default, and
 // configurable), so a spawn is any name ending in spawn_agent.
 const TOOLS = { apply_patch: "edit", Bash: "shell", view_image: "read" };
-const toolKind = (name) => TOOLS[name] || (/spawn_agent$/.test(String(name || "")) ? "spawn" : "");
+const toolKind = (name) => TOOLS[name] || (String(name || "").endsWith("spawn_agent") ? "spawn" : "");
 
 // hooks get no project-dir variable; a hook installed in <root>/.codex/hooks knows its root
 const installedRoot = () => (path.basename(path.dirname(__dirname)) === ".codex" ? path.dirname(path.dirname(__dirname)) : "");
@@ -195,7 +195,7 @@ function tomlTables(text) {
   let cur = out[""];
   for (const l of String(text).split(/\r?\n/)) {
     if (/^\s*\[\[/.test(l)) { cur = {}; continue; } // an array of tables: nothing read here
-    const h = /^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$/.exec(l);
+    const h = /^\s*\[\s*([^[\]]+?)\s*\]\s*(#.*)?$/.exec(l);
     if (h) {
       const k = [...h[1].matchAll(/\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*(?:\.|$)/g)].map((m) => m[2] ?? m[3] ?? m[1]).join("\0");
       cur = out[k] = out[k] || {};
@@ -285,13 +285,15 @@ function registerLead(root) {
   return { file, changed };
 }
 
-// Worker worktrees live in ../<repo>-hive/, outside the project, where workspace-write rejects a
+// Worker worktrees live in ../<repo>-proteus/, outside the project, where workspace-write rejects a
 // worker's apply_patch. The project's .codex/config.toml adds that folder to writable_roots; a
-// textual merge (no TOML parser here) that refuses any shape it cannot edit safely.
-// Returns {file, dir, created, changed, missing} or {file, dir, error}; write=false only checks.
+// textual merge (no TOML parser here) that refuses any shape it cannot edit safely. The legacy
+// worktree folder a run from before the rename used stays listed while git still has a worktree
+// registered in it (legacy: {dir, worktrees}), and goes once none is (stale: that dir).
+// Returns {file, dir, created, changed, missing, legacy, stale} or {file, dir, error}; write=false only checks.
 function sandboxRoots(root, write = true) {
   const abs = path.resolve(root);
-  const dir = path.join(path.dirname(abs), `${path.basename(abs)}-hive`);
+  const dir = path.join(path.dirname(abs), `${path.basename(abs)}-proteus`);
   const file = path.join(abs, ".codex", "config.toml");
   const entry = JSON.stringify(dir); // a JSON string is a TOML basic string
   const table = `[sandbox_workspace_write]\nwritable_roots = [${entry}]\n`;
@@ -328,26 +330,54 @@ function sandboxRoots(root, write = true) {
   let i = text.indexOf("=", start) + 1;
   while (/[ \t]/.test(text[i] || "")) i++;
   if (text[i] !== "[") return refuse("sets writable_roots to something other than an array");
-  const vals = [];
-  let last = "[";
+  // values and commas as tokens with their offsets; comments and whitespace are skipped, never edited
+  const vals = [], toks = [];
   for (i++; i < text.length; i++) {
     const c = text[i];
     if (/\s/.test(c)) continue;
     if (c === "#") { while (i < text.length && text[i] !== "\n") i++; continue; }
     if (c === "]") break;
-    if (c === ",") { last = ","; continue; }
+    if (c === ",") { toks.push({ comma: true, start: i, end: i + 1 }); continue; }
     const m = c === '"' ? /^"((?:[^"\\\n]|\\.)*)"/.exec(text.slice(i)) : c === "'" ? /^'([^'\n]*)'/.exec(text.slice(i)) : null;
     if (!m) return refuse("has a writable_roots value this installer cannot read");
     let v = m[1];
     if (c === '"') { try { v = JSON.parse(`"${v}"`); } catch {} }
-    vals.push(v); last = "v"; i += m[0].length - 1;
+    const x = { v, start: i, end: i + m[0].length };
+    vals.push(x); toks.push(x); i += m[0].length - 1;
   }
   if (text[i] !== "]") return refuse("has an unterminated writable_roots array");
-  if (vals.some((v) => path.resolve(v) === dir)) {
+  const old = legacyWorktreeDir(abs);
+  const isOld = (x) => path.resolve(x.v) === old;
+  const live = vals.some(isOld) ? legacyWorktrees(abs) : [];
+  const legacy = live.length ? { dir: old, worktrees: live } : null;
+  const drop = live.length ? [] : vals.filter(isOld);
+  const stale = drop.length ? old : null;
+  const has = vals.some((x) => path.resolve(x.v) === dir);
+  if (has && !stale) {
     if (write) fs.mkdirSync(dir, { recursive: true });
-    return { file, dir, created: false, changed: false };
+    return { file, dir, created: false, changed: false, legacy };
   }
-  return done(`${text.slice(0, i)}${last === "v" ? ", " : ""}${entry}${text.slice(i)}`, false);
+  if (!write) return { file, dir, missing: !has, stale, legacy };
+  // each stale entry goes with one comma token beside it (the next, else the one before), so the rest stays
+  // comma-separated and a comment between them stays put; ours goes in before the ], after a comma when the
+  // last token left is a value. Tokens, not text: a `#` or `,` inside a string is never read as syntax.
+  const gone = new Set();
+  for (const x of drop) {
+    const j = toks.indexOf(x), after = toks[j + 1], before = toks[j - 1];
+    gone.add(x);
+    if (after && after.comma && !gone.has(after)) gone.add(after);
+    else if (before && before.comma && !gone.has(before)) gone.add(before);
+  }
+  const left = toks.filter((t) => !gone.has(t));
+  let next = text;
+  if (!has) next = `${next.slice(0, i)}${left.length && !left[left.length - 1].comma ? ", " : ""}${entry}${next.slice(i)}`;
+  for (const t of [...gone].sort((a, b) => b.start - a.start)) {
+    const pad = /^[ \t]*/.exec(next.slice(t.end))[0].length; // the blanks after it go too
+    next = next.slice(0, t.start) + next.slice(t.end + pad);
+  }
+  fs.writeFileSync(file, next);
+  fs.mkdirSync(dir, { recursive: true });
+  return { file, dir, created: false, changed: true, legacy, stale };
 }
 
 // Subagents run in the lead's session under its hooks, which enforce owned paths; the copies

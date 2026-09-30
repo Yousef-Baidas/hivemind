@@ -31,7 +31,7 @@ lib.run((ev, ad) => {
 function seenBefore(ev, text) {
   const common = lib.gitCommonDir(lib.projectRoot(ev));
   if (!common) return false;
-  const file = path.join(lib.hiveDir(common), "stall-blocked.json");
+  const file = path.join(lib.stateDir(common), "stall-blocked.json");
   const key = crypto.createHash("sha1").update(`${ev.agent || ev.teammate || ev.session}\n${text}`).digest("hex");
   const seen = lib.readJSON(file, []);
   const list = Array.isArray(seen) ? seen : [];

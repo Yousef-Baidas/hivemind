@@ -1,6 +1,6 @@
 # Tracker
 
-Proteus keeps no state in the repo. Tickets, milestones, the run log, maps, worker reports, verdicts, debt, review briefs, and the review queue live in the tracker. The repo gets deliverables, checks, contracts, lessons, ADRs, and the three docs a human would want anyway: `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`. Nothing else. `teams/` is config, shared like lint config. Agent memory is `local` (git-ignored); hook state is under `.git/hive/`, never committed.
+Proteus keeps no state in the repo. Tickets, milestones, the run log, maps, worker reports, verdicts, debt, review briefs, and the review queue live in the tracker. The repo gets deliverables, checks, contracts, lessons, ADRs, and the three docs a human would want anyway: `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`. Nothing else. `teams/` is config, shared like lint config. Agent memory is `local` (git-ignored); hook state is under `.git/proteus/`, never committed.
 
 The lead's task list (Claude Code's Agent Teams list; on Codex the agents it spawned) is a runtime mirror; if it and the tracker disagree, the tracker wins. A session that dies loses nothing.
 
@@ -11,28 +11,28 @@ Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the secon
 | Operation | GitHub |
 |---|---|
 | preflight | `gh auth status` and `gh repo view --json nameWithOwner -q .nameWithOwner`; either fails → stop, tell the human |
-| labels (once) | `gh label create hive`, `hive-log`, `hive-review`, `hive-debt`, `hive-question`, `needs-human`, `needs-research`, `difficulty:standard|hard`, and `profile:<team>` for every team in `teams/ROUTING.md` (`--force`, ignore exists); a team added later gets its label then |
-| run log | one per run: `gh issue create --title "Run: <run>" --label hive-log --body "lead's decision log"`; one comment per decision that lives nowhere else (grilled decisions pre-spec, `UNATTENDED` grant, allowed deviations, parked `NEEDS`, fork point, human hand edits, pause positions, revision mode start and end). The autostart prints its tail at startup and after a compaction. Closed at step 8 |
-| debt | one per milestone, opened with the milestone: `gh issue create --title "Debt: <run>/<m>" --label hive-debt --milestone "<run>/<m>" --body "verifier follow-ups; each line fixed, re-scoped, or dropped by the human at close"`. Verifiers add one comment per non-blocking finding: `#<ticket> <file:line or part> <what> — <why it can wait>`. Never a ticket per follow-up |
+| labels (once) | `gh label create proteus`, `proteus-log`, `proteus-review`, `proteus-debt`, `proteus-question`, `needs-human`, `needs-research`, `difficulty:standard|hard`, and `profile:<team>` for every team in `teams/ROUTING.md` (`--force`, ignore exists), then record `labels: created` and `labels: proteus` under `## Learned`; a team added later gets its label then. `labels: created` without `labels: proteus` means hivemind made the labels under its old names: create these, leave the old ones on the issues they already mark (a run opened before the rename keeps them until it closes), then add `labels: proteus` |
+| run log | one per run: `gh issue create --title "Run: <run>" --label proteus-log --body "lead's decision log"`; one comment per decision that lives nowhere else (grilled decisions pre-spec, `UNATTENDED` grant, allowed deviations, parked `NEEDS`, fork point, human hand edits, pause positions, revision mode start and end). The autostart prints its tail at startup and after a compaction. Closed at step 8 |
+| debt | one per milestone, opened with the milestone: `gh issue create --title "Debt: <run>/<m>" --label proteus-debt --milestone "<run>/<m>" --body "verifier follow-ups; each line fixed, re-scoped, or dropped by the human at close"`. Verifiers add one comment per non-blocking finding: `#<ticket> <file:line or part> <what> — <why it can wait>`. Never a ticket per follow-up |
 | map | `/wayfinder` writes its map as an issue labelled `wayfinder:map`; the repo gets no map file |
 | milestone | `gh api repos/{owner}/{repo}/milestones -f title="<run>/<milestone>"` |
-| ticket | `gh issue create --title "<id>: <intent line>" --label hive,profile:<team>,difficulty:<d> --milestone "<run>/<m>" --body-file -` (body: intent, interface, the check as name + input + expected result, owned paths, depends-on; `needs-research` label when it rests on outside facts) |
-| protect branch (per run) | after `git push -u origin hive/<run>`: `gh api -X PUT "repos/{owner}/{repo}/branches/hive%2F<run>/protection" --input -` with the JSON in `enforcement.md` §1; requires check `gates` green. 403 → `protection: none` in `## Learned`, continue |
+| ticket | `gh issue create --title "<id>: <intent line>" --label proteus,profile:<team>,difficulty:<d> --milestone "<run>/<m>" --body-file -` (body: intent, interface, the check as name + input + expected result, owned paths, depends-on; `needs-research` label when it rests on outside facts) |
+| protect branch (per run) | after `git push -u origin proteus/<run>`: `gh api -X PUT "repos/{owner}/{repo}/branches/proteus%2F<run>/protection" --input -` with the JSON in `enforcement.md` §1; requires check `gates` green. 403 → `protection: none` in `## Learned`, continue |
 | ticket url → worker | the issue number is the ticket id; the worker gets the number, not the body pasted |
 | worker report | `gh issue comment <n> --body "DONE …"` / `NEEDS …` / `RED …` + diff and failing output |
 | CI status | `gh pr checks <pr> --json name,state`; verifier reads it, re-runs only to reproduce a finding |
-| verifier verdict | worker branch has a PR into `hive/<run>`: `gh pr review <pr> --comment --body "MERGE"` or `--request-changes --body "BACK-TO-WORKER …"` (`--approve` is refused on your own PR); `CONTRACT-WRONG` → comment on the issue, close PR |
-| merge | `git worktree remove <wt>` first, then `gh pr merge <pr> --merge --delete-branch` into `hive/<run>`, full suite on `hive/<run>`; `gh issue close <n>` |
-| review brief | `gh issue create --title "Review: <run>/<milestone>" --label hive-review,needs-human --milestone … --body-file <brief>` |
-| evidence | text transcripts inline in the brief. Screenshots and recordings go on branch `hive-evidence/<run>`: first milestone `git checkout --orphan`, later ones `git fetch origin hive-evidence/<run> && git checkout FETCH_HEAD`; add files, commit, `git push origin HEAD:refs/heads/hive-evidence/<run>`; link raw URLs; branch deleted at close |
+| verifier verdict | worker branch has a PR into `proteus/<run>`: `gh pr review <pr> --comment --body "MERGE"` or `--request-changes --body "BACK-TO-WORKER …"` (`--approve` is refused on your own PR); `CONTRACT-WRONG` → comment on the issue, close PR |
+| merge | `git worktree remove <wt>` first, then `gh pr merge <pr> --merge --delete-branch` into `proteus/<run>`, full suite on `proteus/<run>`; `gh issue close <n>` |
+| review brief | `gh issue create --title "Review: <run>/<milestone>" --label proteus-review,needs-human --milestone … --body-file <brief>` |
+| evidence | text transcripts inline in the brief. Screenshots and recordings go on branch `proteus-evidence/<run>`: first milestone `git checkout --orphan`, later ones `git fetch origin proteus-evidence/<run> && git checkout FETCH_HEAD`; add files, commit, `git push origin HEAD:refs/heads/proteus-evidence/<run>`; link raw URLs; branch deleted at close |
 | verdict | human comment on the review issue whose first line is `ACCEPT` or `CHANGES`; unattended guide comments `AUTO-ACCEPT` / `AUTO-HOLD` |
-| question | `gh issue create --title "Q: <run>: <one line>" --label hive-question,needs-human --body-file -` (body: the question, numbered options, `Recommended: <n> because …`, parked tickets `#…`, what happens on each option). Answer: a comment whose first line is `ANSWER <option or text>`; the lead acts, logs it on the run log, closes the issue. Never edited, never asked twice |
-| revision | `gh issue create --title "Revision <run>/<m> r<k>" --label hive --milestone …`; one comment per tweak, evidence, and human `ok` (`operations.md`) |
+| question | `gh issue create --title "Q: <run>: <one line>" --label proteus-question,needs-human --body-file -` (body: the question, numbered options, `Recommended: <n> because …`, parked tickets `#…`, what happens on each option). Answer: a comment whose first line is `ANSWER <option or text>`; the lead acts, logs it on the run log, closes the issue. Never edited, never asked twice |
+| revision | `gh issue create --title "Revision <run>/<m> r<k>" --label proteus --milestone …`; one comment per tweak, evidence, and human `ok` (`operations.md`) |
 | wait for verdict | poll every 30 s with the command under the table |
 | accept | remove `needs-human`, close the review issue, close the milestone |
 | queue (unattended) | review issues still labelled `needs-human`; `/proteus-review` lists `gh issue list --label needs-human --state open` |
 | learned | still `AGENTS.md ## Learned`; that file is for the next human too |
-| close run | PR `hive/<run>` → `main`, body links the milestones; `gh api -X DELETE "repos/{owner}/{repo}/branches/hive%2F<run>/protection"` then `git push origin --delete hive-evidence/<run>` after merge |
+| close run | PR `proteus/<run>` → `main`, body links the milestones; `gh api -X DELETE "repos/{owner}/{repo}/branches/proteus%2F<run>/protection"` then `git push origin --delete proteus-evidence/<run>` after merge |
 
 Verdict poll, background shell, exits on the first verdict comment (Codex cannot run it: `harnesses.md`):
 
