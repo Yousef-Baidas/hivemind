@@ -250,6 +250,19 @@ const gw = JSON.parse(spawnSync(process.execPath, [ghJs], { encoding: "utf8" }).
 ok("win gh: a gh.cmd on PATH runs through cmd.exe, the command line quoted, no shell option", gw.r[0] === "out" && JSON.stringify(gw.calls[0]) === JSON.stringify([path.join("C:\\Windows", "System32", "cmd.exe"), ["/d", "/s", "/c", `""${path.join(GB, "gh.cmd")}" pr list --base proteus/demo --json number,headRefName"`], true, false]), JSON.stringify(gw));
 ok("win gh: an arg cmd.exe would interpret never reaches the gh.cmd shim", gw.r[1] === "" && gw.r[2] === "" && gw.calls.length === 2, JSON.stringify(gw));
 ok("win gh: gh.exe earlier on PATH runs directly with its args intact", gw.r[3] === "out" && JSON.stringify(gw.calls[1]) === JSON.stringify([path.join(GA, "gh.exe"), ["issue", "view", "1&calc"], false, false]), JSON.stringify(gw));
+// a relative PATH entry or SystemRoot resolves against the cwd (the repo), so gh.exe/gh.cmd planted there never run
+const GC = path.join(W, "gh-cwd"); fs.mkdirSync(GC); fs.writeFileSync(path.join(GC, "gh.exe"), ""); fs.writeFileSync(path.join(GC, "gh.cmd"), "");
+const ghCwdJs = path.join(W, "ghcwd.js");
+fs.writeFileSync(ghCwdJs, `const cp = require("child_process"), calls = [];
+cp.execFileSync = (f, a) => { calls.push([f, a]); return "out\\n"; };
+const lib = require(${wq(path.join(H, "proteus-lib.js"))}); process.chdir(${wq(GC)});
+Object.defineProperty(process, "platform", { value: "win32" }); process.env.PATH = ${wq([".", GB].join(path.delimiter))}; process.env.SystemRoot = "C:\\\\Windows";
+lib.gh(["issue", "list"]); process.env.SystemRoot = "."; lib.gh(["issue", "list"]);
+console.log(JSON.stringify(calls));`);
+const gc = JSON.parse(spawnSync(process.execPath, [ghCwdJs], { encoding: "utf8" }).stdout || "null") || [];
+const gcCall = JSON.stringify([path.join("C:\\Windows", "System32", "cmd.exe"), ["/d", "/s", "/c", `""${path.join(GB, "gh.cmd")}" issue list"`]]);
+ok("win gh: a relative PATH entry is skipped, so gh.exe and gh.cmd in the cwd never run", JSON.stringify(gc[0]) === gcCall, JSON.stringify(gc));
+ok("win gh: a relative SystemRoot falls back to C:\\Windows for cmd.exe", JSON.stringify(gc[1]) === gcCall, JSON.stringify(gc));
 ok("worker guard: bg denied", run(WH("proteus-worker-guard.js"), wpre("Bash", { command: "x", run_in_background: true }), { cwd: WT }).code === 2);
 ok("worker guard: Monitor denied", run(WH("proteus-worker-guard.js"), wpre("Monitor", {}), { cwd: WT }).code === 2);
 ok("worker guard: fg allowed", run(WH("proteus-worker-guard.js"), wpre("Bash", { command: "npm test" }), { cwd: WT }).code === 0);

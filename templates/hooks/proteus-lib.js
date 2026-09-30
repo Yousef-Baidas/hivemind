@@ -317,17 +317,19 @@ function gh(args, cwd, timeout = 6000) {
 // cmd.exe expands or splits on anything outside this set, so a gh.cmd call passes only such args
 const CMD_SAFE = /^[\w.,:/@=+-]+$/;
 
-// [file, args, opts] that run gh, or null. Elsewhere plain "gh". On win32 the first PATH dir (never the cwd)
-// holding gh.exe or gh.cmd: the .exe runs directly; a .cmd shim needs cmd.exe (since CVE-2024-27980 Node
-// refuses it without a shell), so it runs as `cmd /d /s /c ""<shim>" <args>"` only when every arg is CMD_SAFE.
+// [file, args, opts] that run gh, or null. Elsewhere plain "gh". On win32 the first absolute PATH dir holding
+// gh.exe or gh.cmd; relative entries (".", "tools", "C:bin") would resolve against the cwd, so they are skipped.
+// The .exe runs directly; a .cmd shim needs cmd.exe (since CVE-2024-27980 Node refuses it without a shell), so
+// it runs as `cmd /d /s /c ""<shim>" <args>"` only when every arg is CMD_SAFE.
 function ghCommand(args) {
   if (process.platform !== "win32") return ["gh", args, {}];
-  for (const d of String(process.env.PATH || "").split(path.delimiter).map((x) => x.replace(/"/g, "")).filter(Boolean)) {
+  for (const d of String(process.env.PATH || "").split(path.delimiter).map((x) => x.replace(/"/g, "")).filter((x) => path.win32.isAbsolute(x))) {
     const exe = path.join(d, "gh.exe"), shim = path.join(d, "gh.cmd");
     if (fs.existsSync(exe)) return [exe, args, {}];
     if (!fs.existsSync(shim)) continue;
     if (/[%!]/.test(shim) || !args.every((a) => CMD_SAFE.test(String(a)))) return null;
-    const comspec = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe");
+    const root = process.env.SystemRoot || "";
+    const comspec = path.join(path.win32.isAbsolute(root) ? root : "C:\\Windows", "System32", "cmd.exe");
     return [comspec, ["/d", "/s", "/c", `""${shim}" ${args.join(" ")}"`], { windowsVerbatimArguments: true }];
   }
   return null;
