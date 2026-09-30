@@ -73,4 +73,4 @@ if (r.error) {
   process.exitCode = 1;
   return;
 }
-console.log(`lead     -> ${file} (${r.changed ? "hooks registered" : "hooks already registered"}, ${copied} files updated${removed ? `, ${removed} unused removed` : ""}; ${ad.bypass} skips them)`);
+console.log(`lead     -> ${file.split(path.sep).join("/")} (${r.changed ? "hooks registered" : "hooks already registered"}, ${copied} files updated${removed ? `, ${removed} unused removed` : ""}; ${ad.bypass} skips them)`);
