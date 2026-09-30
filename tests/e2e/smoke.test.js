@@ -25,6 +25,9 @@ if (WIN && !pwsh) {
   summary();
   process.exit();
 }
+// Claude Code on win32 runs hook commands in Git Bash, not cmd.exe (which leaves $CLAUDE_PROJECT_DIR unexpanded)
+const gitDir = WIN && (process.env.PATH || "").split(path.delimiter).find((d) => d && fs.existsSync(path.join(d, "git.exe")));
+const hookShell = !WIN || (gitDir && [path.join(gitDir, "..", "bin", "bash.exe"), path.join(gitDir, "..", "..", "bin", "bash.exe")].find((p) => fs.existsSync(p)));
 
 // mtimes of the real homes where an install lands; ~/.claude itself and proteus.json change under any live session
 const REAL = os.userInfo().homedir;
@@ -165,7 +168,9 @@ const walk = (d, rel = "") => fs.readdirSync(path.join(d, rel)).flatMap((n) => {
 
   // 5. autostart
   const payload = JSON.stringify({ session_id: "e2e-smoke", hook_event_name: "SessionStart", source: "startup", cwd: A });
-  const a = auto ? spawnSync(auto, { cwd: A, env: { ...E, CLAUDE_PROJECT_DIR: A }, input: payload, shell: true, encoding: "utf8", windowsHide: true, timeout: 120000 }) : { stdout: "", stderr: "no autostart registered" };
+  const a = !auto ? { stdout: "", stderr: "no autostart registered" }
+    : !hookShell ? { stdout: "", stderr: "Git Bash not found beside git.exe on PATH" }
+    : spawnSync(auto, { cwd: A, env: { ...E, CLAUDE_PROJECT_DIR: A }, input: payload, shell: hookShell, encoding: "utf8", windowsHide: true, timeout: 120000 });
   ok("5 autostart: the registered SessionStart command prints proteus autostart:", /proteus autostart:/.test(a.stdout || ""), `${a.stdout || ""}${a.stderr || ""}`.slice(-600));
 
   // 6. update
