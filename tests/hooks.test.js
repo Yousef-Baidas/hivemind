@@ -773,7 +773,7 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
     fs.existsSync(path.join(P1, ".codex", "rules", "hivemind.rules")) && /hive-statusline\.js/.test(sj.statusLine.command));
   const oldDoc = run(INST, "", { args: ["--doctor"], cwd: P2, env: tenv() });
   ok("takeover: doctor names global and repo leftovers", /^FIX  hivemind leftovers: .*hivemind\.json/m.test(oldDoc.out) && /^FIX  hivemind's pieces in this repo: .*\.claude\/hooks\/hive-autostart\.js/m.test(oldDoc.out) &&
-    new RegExp(`^WARN still on hivemind under ${PJ}: .*app`, "m").test(oldDoc.out), oldDoc.out);
+    new RegExp(`^WARN still on hivemind under ${PJ.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .*app`, "m").test(oldDoc.out), oldDoc.out);
 
   r = run(INST, "", { args: ["--project"], cwd: P1, env: tenv() });
   const has = (...p) => fs.existsSync(path.join(...p));
@@ -853,7 +853,7 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   const hj = JSON.parse(fs.readFileSync(path.join(CX, ".codex", "hooks.json"), "utf8"));
   const guardCmd = (hj.hooks.PreToolUse || []).find((e) => /proteus-lead-guard/.test(JSON.stringify(e)));
   ok("codex install: .codex/hooks.json with absolute hook paths, exact-name guard matcher, rules file", r.code === 0 && /PROTEUS=0 codex skips them/.test(r.out) &&
-    guardCmd && guardCmd.matcher === "^(apply_patch|Bash|view_image|[a-z_]*spawn_agent)$" && guardCmd.hooks[0].command === `node "${path.join(CX, ".codex", "hooks", "proteus-lead-guard.js")}"` &&
+    guardCmd && guardCmd.matcher === "^(apply_patch|Bash|view_image|[a-z_]*spawn_agent)$" && guardCmd.hooks[0].command === `node "${path.join(CX, ".codex", "hooks", "proteus-lead-guard.js").split(path.sep).join("/")}"` &&
     hj.hooks.SessionStart[0].hooks[0].timeout === 60 && !hj.hooks.PostToolUseFailure && !hj.hooks.TeammateIdle &&
     /prefix_rule\(pattern=\["gh"\]/.test(fs.readFileSync(path.join(CX, ".codex", "rules", "proteus.rules"), "utf8")) && fs.existsSync(path.join(CX, ".codex", "hooks", "proteus-harness-codex.js")), r.out + r.err);
   r = run(path.join(SRC, "install-lead-hooks.js"), "", { cwd: CX, env: { ...cenvx, PROTEUS_HARNESS: "codex" } });
@@ -948,7 +948,7 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   const kinds = { type: "response_item", payload: { type: "message", role: "user", internal_chat_message_metadata_passthrough: { content_item_kinds: ["hooks.additional_context"] }, content: [{ type: "input_text", text: "looks human" }] } };
   ok("codex readers: user-role items tagged as injected are skipped", cx.lastHumanPrompt({ raw: { transcript_path: tr("cx-k.jsonl", [JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "typed" } }), JSON.stringify(kinds)]) } }) === "typed");
   const e = cx.event({ hook_event_name: "PreToolUse", cwd: "/r", tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Add File: a/new.ts\n+x\n*** Update File: b.ts\n*** Move to: c.ts\n*** Delete File: /abs/d.ts\n*** End Patch" } });
-  ok("codex event: every patch path, resolved against cwd; the patch is not a shell command", JSON.stringify(e.paths) === JSON.stringify(["/r/a/new.ts", "/r/b.ts", "/r/c.ts", "/abs/d.ts"]) && e.tool === "edit" && e.command === "" && e.path === "/r/a/new.ts", JSON.stringify(e.paths));
+  ok("codex event: every patch path, resolved against cwd; the patch is not a shell command", JSON.stringify(e.paths) === JSON.stringify(["a/new.ts", "b.ts", "c.ts", "/abs/d.ts"].map((x) => path.resolve("/r", x))) && e.tool === "edit" && e.command === "" && e.path === path.resolve("/r/a/new.ts"), JSON.stringify(e.paths));
 
   // .codex/config.toml: ../<repo>-proteus/ joins writable_roots without disturbing the rest
   const SB = path.join(W, "sb", "app"), SBD = JSON.stringify(path.join(W, "sb", "app-proteus")), SBF = path.join(SB, ".codex", "config.toml");
@@ -1206,27 +1206,30 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   d = run(INST, "", { args: ["--doctor"], cwd: VD, env: vh }).out;
   ok("verify-profiles (d): with teams/security deleted, --doctor prints a FIX row naming security and --project", /^FIX .*security.*--project/m.test(d), d);
 
-  // (c) sandboxRoots on win32: roots match by samePath, so the drive letter's case does not matter. The child fakes
-  // win32 and runs in a temp cwd, where "C:\x\repo\.codex\config.toml" is just a file name.
+  // (c) sandboxRoots on win32: roots match by samePath, so the drive letter's case does not matter. Elsewhere the child
+  // fakes win32 and runs in a temp cwd, where "C:\x\repo\.codex\config.toml" is just a file name; on win32 the repo is
+  // a real temp dir, listed with its drive letter lowercased
   const CW = path.join(W, "instfix-c"); fs.mkdirSync(CW);
+  const CR = WIN32 ? path.join(CW, "x", "repo") : "C:\\x\\repo", CL = CR[0].toLowerCase() + CR.slice(1);
+  if (WIN32) fs.mkdirSync(path.join(CR, ".codex"), { recursive: true });
   const cjs = path.join(W, "instfix-c.js");
   fs.writeFileSync(cjs, `process.chdir(${JSON.stringify(CW)});
 Object.defineProperty(process, "platform", { value: "win32" });
 const fs = require("fs");
 const cx = require(${JSON.stringify(path.join(SRC, "proteus-harness-codex.js"))});
 const p = require("path"); Object.assign(p, p.win32); // after the requires: the module loader needs posix paths
-const file = "C:\\\\x\\\\repo\\\\.codex\\\\config.toml";
-const go = (roots) => { fs.writeFileSync(file, "[sandbox_workspace_write]\\nwritable_roots = " + JSON.stringify(roots).replace(/","/g, '", "') + "\\n"); const res = cx.sandboxRoots("C:\\\\x\\\\repo"); return { res, text: fs.readFileSync(file, "utf8") }; };
-console.log(JSON.stringify({ same: go(["c:\\\\x\\\\repo-proteus"]), stale: go(["c:\\\\x\\\\repo-hive"]), both: go(["c:\\\\x\\\\repo-hive", "c:\\\\x\\\\repo-proteus"]) }));`);
-  const cr = spawnSync(process.execPath, [cjs], { encoding: "utf8" });
+const root = ${JSON.stringify(CR)}, low = ${JSON.stringify(CL)}, file = root + "\\\\.codex\\\\config.toml";
+const go = (roots) => { fs.writeFileSync(file, "[sandbox_workspace_write]\\nwritable_roots = " + JSON.stringify(roots).replace(/","/g, '", "') + "\\n"); const res = cx.sandboxRoots(root); return { res, text: fs.readFileSync(file, "utf8") }; };
+console.log(JSON.stringify({ same: go([low + "-proteus"]), stale: go([low + "-hive"]), both: go([low + "-hive", low + "-proteus"]) }));`);
+  const cr = spawnSync(process.execPath, [cjs], { encoding: "utf8", windowsHide: true });
   let cw = {}; try { cw = JSON.parse(cr.stdout); } catch {}
   const tomlOf = (roots) => "[sandbox_workspace_write]\nwritable_roots = " + JSON.stringify(roots).replace(/","/g, '", "') + "\n";
   ok("installer-fixes (c): win32, c:\\x\\repo-proteus already listed for C:\\x\\repo: roots unchanged, not duplicated",
-    !!cw.same && cw.same.res.changed === false && !cw.same.res.error && cw.same.text === tomlOf(["c:\\x\\repo-proteus"]), cr.stderr + JSON.stringify(cw.same));
+    !!cw.same && cw.same.res.changed === false && !cw.same.res.error && cw.same.text === tomlOf([CL + "-proteus"]), cr.stderr + JSON.stringify(cw.same));
   ok("installer-fixes (c): win32, a stale c:\\x\\repo-hive with no live worktrees is dropped and the -proteus root added once",
     !!cw.stale && !cw.stale.text.toLowerCase().includes("repo-hive") && cw.stale.text.split("repo-proteus").length === 2, cr.stderr + JSON.stringify(cw.stale));
   ok("installer-fixes (c): win32, a stale -hive root beside a -proteus root in another case: only the -hive root goes",
-    !!cw.both && cw.both.text === tomlOf(["c:\\x\\repo-proteus"]), cr.stderr + JSON.stringify(cw.both));
+    !!cw.both && cw.both.text === tomlOf([CL + "-proteus"]), cr.stderr + JSON.stringify(cw.both));
 }
 
 lib.summary();
