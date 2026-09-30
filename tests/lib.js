@@ -61,13 +61,18 @@ function g(cwd, ...args) {
   return execFileSync("git", args, { cwd, env: ENV, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
+// one hermetic temp dir per call, with fake gh and claude on PATH (#35)
+function sandbox(_tag) {
+  throw new Error("not implemented: #35");
+}
+
 function summary() {
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;
 }
 
 module.exports = {
-  ok, run, g, workdir, summary,
+  ok, run, g, workdir, sandbox, summary,
   get ENV() { need(); return ENV; },
   get BIN() { need(); return BIN; },
   get HOME() { need(); return HOME; },
