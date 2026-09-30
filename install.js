@@ -500,7 +500,7 @@ function copyTeams(root) {
   for (const p of L.profiles(SHIPPED_TEAMS)) {
     const src = path.join(SHIPPED_TEAMS, p), dest = path.join(teams, p);
     const dl = lstat(dest);
-    if (dl && dl.isSymbolicLink()) continue; // a linked team folder is the repo's; never write through it
+    if (dl && !dl.isDirectory()) continue; // a linked or plain-file team entry is the repo's; never write through it
     if (hadRoster && !dl && !VERIFY_ONLY.includes(p)) continue;
     fs.mkdirSync(dest, { recursive: true });
     for (const f of ["PROFILE.md", "skills.txt"]) {

@@ -1157,6 +1157,11 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   r = run(INST, "", { args: ["--project"], cwd: VC, env: cenv(chome("vp-c")) });
   ok("verify-profiles (c): a teams/security symlink to an outside dir: nothing is written into that dir", r.code === 0 &&
     fs.readdirSync(outside).length === 0 && fs.lstatSync(path.join(VC, "teams", "security")).isSymbolicLink(), fs.readdirSync(outside).join() + r.out + r.err);
+  const VE = vp("e"), vef = path.join(VE, "teams", "qa");
+  fs.writeFileSync(vef, "not a dir\n");
+  r = run(INST, "", { args: ["--project"], cwd: VE, env: cenv(chome("vp-e")) });
+  ok("verify-profiles (e): teams/qa a regular file is skipped: --project exits 0 and the file is untouched", r.code === 0 &&
+    fs.readFileSync(vef, "utf8") === "not a dir\n", r.out + r.err);
   const VD = vp("d"), vh = cenv(chome("vp-d"));
   run(INST, "", { args: ["--project"], cwd: VD, env: vh });
   fs.rmSync(path.join(VD, "teams", "security"), { recursive: true, force: true });
