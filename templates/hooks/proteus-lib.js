@@ -279,6 +279,13 @@ function ownedDenial(wt, target) {
   return owned.some((g) => ownedMatch(g, rel)) ? "" : needs(`not in ${path.relative(wt, ownedFile(wt)).split(path.sep).join("/")}`);
 }
 
+// same path after resolving; case-insensitive on win32 (drive letters and folders), like link-skills.js samePath
+function samePath(a, b) {
+  if (!a || !b) return false;
+  const x = path.resolve(a), y = path.resolve(b);
+  return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
 // last `bytes` of a file as complete lines (first partial line dropped)
 function tailLines(file, bytes = 256 * 1024) {
   if (!file) return [];
@@ -421,7 +428,7 @@ module.exports = {
   readInbox, refreshInbox, inboxFile,
   run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, stateDir, readJSON, writeJSON,
   CURRENT, LEGACY, SCHEMES, schemeOf, runName, runRefs, runBranches, legacyStateDir, legacyWorktreeDir, legacyWorktrees, migrateState,
-  configFile, proteusConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
+  configFile, proteusConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, samePath, envInt, git, gh,
   workerDenial, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, syncText, WAIT_MSG, EDIT_LAST_MSG,
 };
 try { harness(); } catch {}
