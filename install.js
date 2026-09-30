@@ -474,6 +474,8 @@ function teamsIgnore(teams, act) {
   return add;
 }
 
+const VERIFY_ONLY = ["qa", "security"];
+
 function copyTeams(root) {
   const teams = path.join(root, "teams");
   // self-host: the checkout's own templates/ and link scripts are the source, never copied into git
@@ -491,12 +493,15 @@ function copyTeams(root) {
     log("removed  teams/templates/hooks/settings.local.json (renamed to worktree-settings.local.json)");
   }
   // the routing table is the repo's once copied, like PROFILE.md
-  // a repo with its own roster keeps it: profile folders are seeded only when there was no ROUTING.md
+  // a repo with its own roster keeps it: profile folders are seeded only when there was no ROUTING.md,
+  // except the verify-only teams, which ROUTING never names but the lead still spawns
   const hadRoster = !!lstat(path.join(teams, "ROUTING.md"));
   if (!hadRoster) fs.copyFileSync(path.join(SHIPPED_TEAMS, "ROUTING.md"), path.join(teams, "ROUTING.md"));
   for (const p of L.profiles(SHIPPED_TEAMS)) {
     const src = path.join(SHIPPED_TEAMS, p), dest = path.join(teams, p);
-    if (hadRoster && !isDir(dest)) continue;
+    const dl = lstat(dest);
+    if (dl && dl.isSymbolicLink()) continue; // a linked team folder is the repo's; never write through it
+    if (hadRoster && !dl && !VERIFY_ONLY.includes(p)) continue;
     fs.mkdirSync(dest, { recursive: true });
     for (const f of ["PROFILE.md", "skills.txt"]) {
       if (isFile(path.join(src, f)) && !lstat(path.join(dest, f))) fs.copyFileSync(path.join(src, f), path.join(dest, f));
@@ -1024,6 +1029,10 @@ async function doctor(fix) {
     } else {
       check(() => isFile(path.join(root, "teams", "ROUTING.md")) ? ["ok", "teams/ROUTING.md"]
         : ["WARN", "teams/ROUTING.md missing", `${self} --project`]);
+      check(() => {
+        const miss = VERIFY_ONLY.filter((t) => !isFile(path.join(root, "teams", t, "PROFILE.md")));
+        return miss.length ? ["FIX", `verify-only profile missing: ${miss.map((t) => `teams/${t}/PROFILE.md`).join(", ")}`, `${self} --project`] : ["ok", "verify-only profiles present"];
+      }, () => copyTeams(root));
       check(() => {
         const s = readJson(path.join(root, ...(cxh ? [".codex", "hooks.json"] : [".claude", "settings.local.json"])));
         const hooks = JSON.stringify((s && s.hooks) || {});

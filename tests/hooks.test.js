@@ -1131,8 +1131,8 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   fs.writeFileSync(path.join(TB, "ROUTING.md"), "| Deliverable | Team |\n|---|---|\n| `install.js` | cli |\n| tests | qa |\n");
   fs.writeFileSync(path.join(TB, "qa", "required.txt"), "stale/repo old-skill\n");
   r = run(INST, "", { args: ["--project"], cwd: RB, env: cenv(chome("instfix-b")) });
-  ok("installer-fixes (b): a repo whose ROUTING.md names only cli and qa gets no teams/frontend or teams/backend", r.code === 0 &&
-    fs.readdirSync(TB).filter((x) => fs.statSync(path.join(TB, x)).isDirectory() && x !== "templates").sort().join() === "cli,qa", fs.readdirSync(TB).join() + r.out + r.err);
+  ok("installer-fixes (b): a repo whose ROUTING.md names only cli and qa gets no teams/frontend or teams/backend, but security is seeded", r.code === 0 &&
+    fs.readdirSync(TB).filter((x) => fs.statSync(path.join(TB, x)).isDirectory() && x !== "templates").sort().join() === "cli,qa,security", fs.readdirSync(TB).join() + r.out + r.err);
   ok("installer-fixes (b): required.txt and templates/ are still refreshed, ROUTING.md untouched",
     fs.readFileSync(path.join(TB, "qa", "required.txt"), "utf8") === fs.readFileSync(path.join(shippedTeams, "qa", "required.txt"), "utf8") &&
     fs.existsSync(path.join(TB, "templates", "hooks")) && fs.readFileSync(path.join(TB, "ROUTING.md"), "utf8").includes("| `install.js` | cli |"), r.out);
