@@ -5,25 +5,30 @@ name: proteus-gates
 on:
   pull_request:
     branches: ["proteus/**"]
+permissions:
+  contents: read
 jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}   # the PR head, not the synthetic merge commit
           fetch-depth: 0
-      # EDIT: one setup action for the stack, e.g.
-      #   - uses: actions/setup-node@v4   with: { node-version: 22, cache: npm }
-      #   - uses: astral-sh/setup-uv@v5
-      #   - uses: dtolnay/rust-toolchain@stable
-      - run: echo EDIT-install     # npm ci | uv sync | cargo fetch
+          persist-credentials: false
+      # EDIT: one setup action for the stack, pinned to a full commit SHA with a version comment, e.g.
+      #   - uses: actions/setup-node@<40-hex sha> # v4.4.0   with: { node-version: 22, cache: npm }
+      #   - uses: astral-sh/setup-uv@<40-hex sha> # vX.Y.Z
+      #   - uses: dtolnay/rust-toolchain@<40-hex sha> # stable
+      - run: echo EDIT-install     # npm ci --ignore-scripts | uv sync | cargo fetch
       - run: echo EDIT-typecheck
       - run: echo EDIT-lint
       - run: echo EDIT-test
       - run: echo EDIT-deadcode    # npx fallow dead-code | vulture . --min-confidence 80 | cargo machete
       - name: commit messages
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          for c in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
-            git log -1 --format=%B "$c" > /tmp/msg && node teams/templates/hooks/commit-msg.js /tmp/msg || exit 1
+          for c in $(git rev-list "origin/$BASE_REF"..HEAD); do
+            git log -1 --format=%B "$c" > "$RUNNER_TEMP/msg" && node teams/templates/hooks/commit-msg.js "$RUNNER_TEMP/msg" || exit 1
           done

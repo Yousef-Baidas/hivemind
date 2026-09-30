@@ -1,27 +1,66 @@
-# Gates for main, hive/** and proteus/**: npm ci, npm run lint, node tests/run.js on push and pull_request; on pull_request also lints every commit message with templates/hooks/commit-msg.js.
+# Gates for main, hive/** and proteus/**: npm ci, npm run lint, node tests/run.js on Linux and Windows; on pull_request also lints every commit message with templates/hooks/commit-msg.js.
 name: ci
 on:
   push:
-    branches: [main, "hive/**", "proteus/**"]
+    branches: [main]
   pull_request:
     branches: [main, "hive/**", "proteus/**"]
+permissions:
+  contents: read
 jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}   # the PR head, not the synthetic merge commit
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: node tests/run.js
       - name: commit messages
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          for c in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
+          for c in $(git rev-list "origin/$BASE_REF"..HEAD); do
             git log -1 --format=%B "$c" > "$RUNNER_TEMP/msg" && node templates/hooks/commit-msg.js "$RUNNER_TEMP/msg" || exit 1
           done
+  # not required yet; no continue-on-error so a red run shows red
+  gates-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # job-level env cannot read the runner context, so later steps get TEMP/TMP through GITHUB_ENV
+      - name: temp dir outside the profile
+        run: |
+          "TEMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TMP=$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}   # the PR head, not the synthetic merge commit
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: node tests/run.js
+      - name: commit messages
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          foreach ($c in (git rev-list "origin/$env:BASE_REF..HEAD")) {
+            git log -1 --format=%B $c | Set-Content -Encoding utf8NoBOM "$env:RUNNER_TEMP/msg"
+            node templates/hooks/commit-msg.js "$env:RUNNER_TEMP/msg"
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
