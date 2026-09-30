@@ -57,11 +57,13 @@ ok("no nested roster copy at teams/templates/teams", !fs.existsSync(path.join(CL
 const linkCopies = ["link-skills.js", "link-skills.sh", "link-skills.ps1"].filter((f) => fs.existsSync(path.join(CLONE, "teams", f)));
 ok("no teams/link-skills.{js,sh,ps1} copy in the checkout", !linkCopies.length, linkCopies.join(", "));
 
-// the move itself (#4 amendment): git tracks the shipped roster under templates/teams and nothing under teams/
+// the move itself (#4 amendment): git tracks the shipped roster under templates/teams; teams/ may track only the repo's own roster (human-approved on #32), never teams/templates
 const shipped = (git(["ls-files", "templates/teams"]).stdout || "").split("\n").filter(Boolean);
 const want = ["ROUTING.md", ...["backend", "devops", "frontend", "qa", "security"].map((t) => `${t}/PROFILE.md`)].map((f) => `templates/teams/${f}`);
 ok("git ls-files templates/teams lists ROUTING.md and each team's PROFILE.md", want.every((f) => shipped.includes(f)), want.filter((f) => !shipped.includes(f)).join(", "));
 const own = git(["ls-files", "teams"]);
-ok("git ls-files teams is empty", own.status === 0 && !own.stdout.trim(), own.stdout || own.stderr);
+const rosterRe = /^teams\/(ROUTING\.md|skills-lock\.json|[a-z0-9-]+\/(PROFILE\.md|CRAFT\.md|skills\.txt|required\.txt|skills\/.+))$/;
+const stray = own.stdout.split("\n").filter(Boolean).filter((f) => !rosterRe.test(f) || f.startsWith("teams/templates/"));
+ok("every tracked path under teams/ is roster content, none under teams/templates/", own.status === 0 && !stray.length, stray.join("\n") || own.stderr);
 
 summary();

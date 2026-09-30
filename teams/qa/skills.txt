@@ -1,0 +1,2 @@
+# <owner/repo> <skill-name> per line. Approved by the human on #32.
+mattpocock/skills tdd
