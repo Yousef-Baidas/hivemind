@@ -36,6 +36,9 @@ const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: SRC, encoding: "u
 console.log(`${T}: legacy fixtures; checkout under test ${SRC} (${tracked.length} tracked files)`);
 
 // ---- fakes: claude (the context-mode plugin, in the fake HOME) and a stateful gh (issues, labels, PRs in DB)
+// each a node script; on win32 a .cmd shim beside it, since PATH lookup there never finds an extensionless file
+const WIN = process.platform === "win32";
+const shim = (file) => { if (WIN) fs.writeFileSync(`${file}.cmd`, `@echo off\r\n"${process.execPath}" "%~dp0${path.basename(file)}" %*\r\n`); };
 const CTX = "context-mode@context-mode";
 fs.writeFileSync(path.join(lib.BIN, "claude"), `#!${process.execPath}
 const fs = require("fs"), path = require("path"), os = require("os");
@@ -77,6 +80,7 @@ if (c1 === "pr" && c2 === "list") out(db.prs.filter((p) => !all("--base").length
 const r = spawnSync(process.execPath, [process.env.FAKE_GH_FALLBACK, ...argv], { stdio: "inherit" });
 process.exit(r.status === null ? 1 : r.status);
 `, { mode: 0o755 });
+shim(path.join(lib.BIN, "claude")); shim(path.join(GBIN, "gh"));
 const DB = path.join(T, "gh.json");
 const iso = (h) => new Date(Date.UTC(2026, 8, 28) + h * 3600e3).toISOString();
 const ms = { number: 1, title: `${RUN}/m1` };
@@ -92,7 +96,8 @@ fs.writeFileSync(DB, JSON.stringify({
 }));
 
 // ---- helpers
-const envFor = (home, extra = {}) => ({ HOME: home, PATH: [GBIN, lib.BIN, path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter), FAKE_GH_DB: DB, FAKE_GH_FALLBACK: path.join(lib.BIN, "gh"), ...extra });
+// lib.ENV.PATH is lib.BIN, node's dir, then the OS dirs (git's own dir too on win32)
+const envFor = (home, extra = {}) => ({ HOME: home, USERPROFILE: home, PATH: [GBIN, lib.ENV.PATH].join(path.delimiter), FAKE_GH_DB: DB, FAKE_GH_FALLBACK: path.join(lib.BIN, WIN ? "gh.js" : "gh"), ...extra });
 const fakeHome = (n) => { const h = path.join(T, `home-${n}`); fs.mkdirSync(path.join(h, ".claude"), { recursive: true }); return h; };
 const run = (script, cwd, home, args = [], input = "", extra = {}) => lib.run(script, input, { cwd, env: envFor(home, extra), args });
 const read = (...p) => { try { return fs.readFileSync(path.join(...p), "utf8"); } catch { return null; } };

@@ -46,9 +46,13 @@ function tmp(tag) {
 const TOOLS = tmp("tools");
 const BIN = path.join(TOOLS, "bin");
 fs.mkdirSync(BIN);
-fs.symlinkSync(process.execPath, path.join(BIN, "node"));
+const WIN = process.platform === "win32";
+// on win32 PATH lookup never finds an extensionless file: node, gh and claude get a .cmd shim each
+const shim = (name, target) => fs.writeFileSync(path.join(BIN, `${name}.cmd`), `@echo off\r\n"${process.execPath}" ${target ? `"%~dp0${target}" ` : ""}%*\r\n`);
+if (WIN) shim("node", ""); else fs.symlinkSync(process.execPath, path.join(BIN, "node"));
 fs.copyFileSync(path.join(__dirname, "fakegh.js"), path.join(BIN, "gh"));
 fs.chmodSync(path.join(BIN, "gh"), 0o755);
+if (WIN) shim("gh", "gh");
 // fake claude: records the context-mode plugin the way the real CLI does, in the fake HOME
 const CTX = "context-mode@context-mode";
 fs.writeFileSync(path.join(BIN, "claude"), `#!${process.execPath}
@@ -62,10 +66,15 @@ if (a === "plugin install ${CTX} --scope user" || a === "plugin enable ${CTX} --
   const s = rd(path.join(d, "settings.json")); s.enabledPlugins = { ...s.enabledPlugins, "${CTX}": true }; fs.writeFileSync(path.join(d, "settings.json"), JSON.stringify(s));
 }
 `, { mode: 0o755 });
+if (WIN) shim("claude", "claude");
 
-// PATH leaves out node's own bin dir, which may hold a real codex or claude
+// PATH leaves out node's own bin dir, which may hold a real codex or claude; on win32 the OS dirs are System32, the
+// Windows dir and git's own dir (it lives outside them), and cmd.exe and the shims need SystemRoot, ComSpec and PATHEXT
+const SYSROOT = process.env.SystemRoot || "C:\\Windows";
+const SYS = WIN ? [path.join(SYSROOT, "System32"), SYSROOT, ...(process.env.PATH || "").split(path.delimiter).filter((d) => d && fs.existsSync(path.join(d, "git.exe"))).slice(0, 1)] : ["/usr/bin", "/bin"];
+const WINENV = WIN ? Object.fromEntries(["SystemRoot", "ComSpec", "PATHEXT"].flatMap((k) => (process.env[k] ? [[k, process.env[k]]] : []))) : {};
 const envFor = (home) => ({
-  PATH: [BIN, "/usr/bin", "/bin"].join(path.delimiter), HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"),
+  PATH: [BIN, ...SYS].join(path.delimiter), HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), ...WINENV,
   GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t",
 });
 const git = (args, cwd, input) => spawnSync("git", args, { cwd, env: envFor(TOOLS), encoding: "utf8", input, maxBuffer: 1 << 28 });
