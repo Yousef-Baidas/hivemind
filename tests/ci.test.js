@@ -4,7 +4,8 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
-const { ok, summary } = require(path.join(__dirname, "lib.js"));
+const { ok, summary, workdir } = require(path.join(__dirname, "lib.js"));
+const { spawnSync } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
 const FILES = [
@@ -87,12 +88,35 @@ for (const { name, file, ci } of FILES) {
   const scripted = npmCi.filter((x) => !/\bnpm ci\b[^\n]*--ignore-scripts/.test(x.text));
   ok(`${name}: npm ci --ignore-scripts is used`, npmCi.length > 0, "no npm ci in any run:");
   ok(`${name}: every npm ci passes --ignore-scripts`, scripted.length === 0, at(scripted));
-  const w = lines.findIndex((l) => /^\s{2}gates-windows:\s*$/.test(l));
-  const wBody = w < 0 ? [] : block(lines, w, indent(lines[w]));
+  const job = (id) => { const j = lines.findIndex((l) => new RegExp(`^\\s{2}${id}:\\s*$`).test(l)); return j < 0 ? null : block(lines, j, indent(lines[j])); };
+  for (const id of ["gates", "gates-windows"]) {
+    const body = job(id) || [];
+    const cmds = runs(body.map((x) => x.text)).map((x) => x.text.trim());
+    for (const c of ["npm run lint", "node tests/run.js"]) ok(`${name}: ${id} runs ${c}`, cmds.includes(c), body.length ? cmds.join(" | ") : `no ${id} job`);
+  }
+  const wBody = job("gates-windows") || [];
+  const w = wBody.length ? 0 : -1;
   ok(`${name}: a gates-windows job runs on windows-latest`, wBody.some((x) => /^\s*runs-on:\s*windows-latest\s*$/.test(x.text)), w < 0 ? "no gates-windows job" : at(wBody.slice(0, 3)));
   ok(`${name}: gates-windows has no continue-on-error`, !wBody.some((x) => /continue-on-error/.test(x.text)), at(wBody.filter((x) => /continue-on-error/.test(x.text))));
   const push = branches(lines, "push");
   ok(`${name}: push: lists only main`, !!push && push.length === 1 && push[0] === "main", JSON.stringify(push));
 }
+
+// run.js guard: a copy of run.js beside stub test files must exit 0 when both kinds are found, and 1 naming what is missing otherwise
+const W = workdir("ci-run-guard");
+const stub = "console.log('1 passed, 0 failed');\n";
+const guard = (tag, layout) => {
+  const dir = path.join(W, tag);
+  fs.mkdirSync(path.join(dir, "e2e"), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, "run.js"), path.join(dir, "run.js"));
+  for (const f of layout) fs.writeFileSync(path.join(dir, f), stub);
+  return spawnSync(process.execPath, [path.join(dir, "run.js")], { encoding: "utf8" });
+};
+const both = guard("both", ["a.test.js", "e2e/smoke.test.js"]);
+ok("run.js: exits 0 with a tests/*.test.js and e2e/smoke.test.js", both.status === 0, both.stdout + both.stderr);
+const noE2e = guard("no-e2e", ["a.test.js", "e2e/other.test.js"]);
+ok("run.js: exits 1 naming e2e/smoke.test.js when it is missing", noE2e.status === 1 && /missing e2e\/smoke\.test\.js/.test(noE2e.stdout), noE2e.status + noE2e.stdout);
+const noTop = guard("no-top", ["e2e/smoke.test.js"]);
+ok("run.js: exits 1 naming tests/*.test.js when none is found", noTop.status === 1 && /missing tests\/\*\.test\.js/.test(noTop.stdout), noTop.status + noTop.stdout);
 
 summary();

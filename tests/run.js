@@ -1,5 +1,5 @@
 // Runs every tests/*.test.js, then every tests/e2e/*.test.js, in turn and totals their "N passed, M failed" lines.
-// Exits 1 if any file exits non-zero, prints no summary line, or none are found; else 0.
+// Exits 1 if any file exits non-zero, prints no summary line, or e2e/smoke.test.js or every tests/*.test.js is missing; else 0.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -8,6 +8,8 @@ const { spawnSync } = require("child_process");
 const tests = (dir) => { try { return fs.readdirSync(path.join(__dirname, dir)).filter((f) => f.endsWith(".test.js")).sort().map((f) => path.join(dir, f)); } catch { return []; } };
 const files = [...tests("."), ...tests("e2e")];
 console.log(`${__dirname}: ${files.length} test files`);
+const missing = [files.includes(path.join("e2e", "smoke.test.js")) || "e2e/smoke.test.js", files.some((f) => path.dirname(f) === ".") || "tests/*.test.js"].filter((m) => typeof m === "string");
+if (missing.length) { console.log(`FAIL missing ${missing.join(", ")}`); process.exit(1); }
 let pass = 0, fail = 0, bad = 0;
 for (const f of files) {
   const r = spawnSync(process.execPath, [path.join(__dirname, f)], { encoding: "utf8" });
