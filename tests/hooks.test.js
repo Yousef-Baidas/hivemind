@@ -280,6 +280,19 @@ const ge = JSON.parse(spawnSync(process.execPath, [ghEdgeJs], { encoding: "utf8"
 ok("win gh: a gh.cmd in a PATH dir named a%b or a!b returns \"\" and records no call", ge[0] && ge[1] && ge[0].out === "" && ge[1].out === "" && !ge[0].calls.length && !ge[1].calls.length, JSON.stringify(ge));
 ok("win gh: a quoted PATH entry is searched, the quotes dropped", ge[2] && ge[2].out === "out" && ge[2].calls.length === 1 && ge[2].calls[0][1].join(" ").includes(`"${path.join(GB, "gh.cmd")}"`), JSON.stringify(ge));
 ok("win gh: gh() with no gh on PATH, or an unsafe arg, returns \"\" with no call and no throw", ge.length === 5 && ge[3].out === "" && ge[4].out === "" && !ge[3].calls.length && !ge[4].calls.length, JSON.stringify(ge));
+// gh.cmd with an empty-string arg: cmd.exe would drop it and shift the next flag into its place, so nothing runs;
+// a non-default absolute SystemRoot names the cmd.exe that runs the shim
+const ghArgJs = path.join(W, "gharg.js");
+fs.writeFileSync(ghArgJs, `const cp = require("child_process"), calls = [];
+cp.execFileSync = (f, a) => { calls.push([f, a]); return "out\\n"; };
+const lib = require(${wq(path.join(H, "proteus-lib.js"))});
+Object.defineProperty(process, "platform", { value: "win32" }); process.env.PATH = ${wq(GB)}; process.env.SystemRoot = "C:\\\\Windows";
+const empty = lib.gh(["pr", "list", "--base", "", "--json", "number"]), emptyCalls = calls.splice(0);
+process.env.SystemRoot = "D:\\\\WinNT"; lib.gh(["issue", "list"]);
+console.log(JSON.stringify({ empty, emptyCalls, calls }));`);
+const gg = JSON.parse(spawnSync(process.execPath, [ghArgJs], { encoding: "utf8" }).stdout || "null") || {};
+ok("win gh: a gh.cmd with an empty-string arg returns \"\" and records no call", gg.empty === "" && Array.isArray(gg.emptyCalls) && !gg.emptyCalls.length, JSON.stringify(gg));
+ok("win gh: an absolute non-default SystemRoot names the cmd.exe that runs the shim", !!gg.calls && gg.calls.length === 1 && gg.calls[0][0] === path.join("D:\\WinNT", "System32", "cmd.exe"), JSON.stringify(gg));
 ok("worker guard: bg denied", run(WH("proteus-worker-guard.js"), wpre("Bash", { command: "x", run_in_background: true }), { cwd: WT }).code === 2);
 ok("worker guard: Monitor denied", run(WH("proteus-worker-guard.js"), wpre("Monitor", {}), { cwd: WT }).code === 2);
 ok("worker guard: fg allowed", run(WH("proteus-worker-guard.js"), wpre("Bash", { command: "npm test" }), { cwd: WT }).code === 0);
@@ -1274,6 +1287,25 @@ console.log(JSON.stringify({ fwd: go([${JSON.stringify(CL.split("\\").join("/"))
     !!cw.stale && !cw.stale.text.toLowerCase().includes("repo-hive") && cw.stale.text.split("repo-proteus").length === 2, cr.stderr + JSON.stringify(cw.stale));
   ok("installer-fixes (c): win32, a stale -hive root beside a -proteus root in another case: only the -hive root goes",
     !!cw.both && cw.both.text === tomlOf([CL + "-proteus"]), cr.stderr + JSON.stringify(cw.both));
+
+  // (d) sandboxRoots compares with samePath, which is case-sensitive off win32 and false for an empty root
+  const DW = path.join(W, "instfix-d"), DR = path.join(DW, "repo"), DD = path.join(DW, "repo-proteus");
+  fs.mkdirSync(path.join(DR, ".codex"), { recursive: true }); fs.mkdirSync(DD);
+  const djs = path.join(W, "instfix-d.js");
+  fs.writeFileSync(djs, `const fs = require("fs");
+const cx = require(${JSON.stringify(path.join(SRC, "proteus-harness-codex.js"))});
+const file = ${JSON.stringify(path.join(DR, ".codex", "config.toml"))}, root = ${JSON.stringify(DR)};
+const go = (roots) => { fs.writeFileSync(file, "[sandbox_workspace_write]\\nwritable_roots = " + JSON.stringify(roots) + "\\n"); const res = cx.sandboxRoots(root); return { res, text: fs.readFileSync(file, "utf8") }; };
+const upper = go([${JSON.stringify(path.join(DW, "REPO-proteus"))}]);
+process.chdir(${JSON.stringify(DD)});
+console.log(JSON.stringify({ upper, empty: go([""]) }));`);
+  const dr = spawnSync(process.execPath, [djs], { encoding: "utf8", windowsHide: true });
+  let dw = {}; try { dw = JSON.parse(dr.stdout); } catch {}
+  if (WIN32) console.log("skipped installer-fixes (d) case-only root: NTFS treats REPO-proteus as repo-proteus");
+  else ok("installer-fixes (d): a root differing from repo-proteus only in case is another path, so repo-proteus is still added",
+    !!dw.upper && dw.upper.res.changed === true && dw.upper.text.includes(JSON.stringify(DD)) && dw.upper.text.includes("REPO-proteus"), dr.stderr + JSON.stringify(dw.upper));
+  ok("installer-fixes (d): an empty-string root never matches the cwd, so repo-proteus is added even when it is the cwd",
+    !!dw.empty && dw.empty.res.changed === true && dw.empty.text.includes(JSON.stringify(DD)), dr.stderr + JSON.stringify(dw.empty));
 }
 
 lib.summary();
