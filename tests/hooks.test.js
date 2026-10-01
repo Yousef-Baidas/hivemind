@@ -263,6 +263,23 @@ const gc = JSON.parse(spawnSync(process.execPath, [ghCwdJs], { encoding: "utf8" 
 const gcCall = JSON.stringify([path.join("C:\\Windows", "System32", "cmd.exe"), ["/d", "/s", "/c", `""${path.join(GB, "gh.cmd")}" issue list"`]]);
 ok("win gh: a relative PATH entry is skipped, so gh.exe and gh.cmd in the cwd never run", JSON.stringify(gc[0]) === gcCall, JSON.stringify(gc));
 ok("win gh: a relative SystemRoot falls back to C:\\Windows for cmd.exe", JSON.stringify(gc[1]) === gcCall, JSON.stringify(gc));
+// a gh.cmd under a dir with % or ! never runs (cmd.exe expands them even quoted); a quoted PATH entry is searched;
+// gh() returns "" when gh is absent or an arg is unsafe, called here with no try
+const GP = path.join(W, "gh-a%b"), GQ = path.join(W, "gh-a!b"); fs.mkdirSync(GP); fs.mkdirSync(GQ);
+fs.writeFileSync(path.join(GP, "gh.cmd"), ""); fs.writeFileSync(path.join(GQ, "gh.cmd"), "");
+const ghEdgeJs = path.join(W, "ghedge.js");
+fs.writeFileSync(ghEdgeJs, `const cp = require("child_process"), calls = [];
+cp.execFileSync = (f, a) => { calls.push([f, a]); return "out\\n"; };
+const path = require("path"), lib = require(${wq(path.join(H, "proteus-lib.js"))});
+Object.defineProperty(process, "platform", { value: "win32" }); process.env.SystemRoot = "C:\\\\Windows";
+const at = (dirs, args) => { process.env.PATH = dirs.join(path.delimiter); const out = lib.gh(args); return { out, calls: calls.splice(0) }; };
+const r = [at([${wq(GP)}], ["issue", "list"]), at([${wq(GQ)}], ["issue", "list"]), at(['"' + ${wq(GB)} + '"'], ["issue", "list"]),
+  at([${wq(path.join(W, "gh-none"))}], ["issue", "list"]), at([${wq(GB)}], ["issue", "view", "1&calc"])];
+console.log(JSON.stringify(r));`);
+const ge = JSON.parse(spawnSync(process.execPath, [ghEdgeJs], { encoding: "utf8" }).stdout || "null") || [];
+ok("win gh: a gh.cmd in a PATH dir named a%b or a!b returns \"\" and records no call", ge[0] && ge[1] && ge[0].out === "" && ge[1].out === "" && !ge[0].calls.length && !ge[1].calls.length, JSON.stringify(ge));
+ok("win gh: a quoted PATH entry is searched, the quotes dropped", ge[2] && ge[2].out === "out" && ge[2].calls.length === 1 && ge[2].calls[0][1].join(" ").includes(`"${path.join(GB, "gh.cmd")}"`), JSON.stringify(ge));
+ok("win gh: gh() with no gh on PATH, or an unsafe arg, returns \"\" with no call and no throw", ge.length === 5 && ge[3].out === "" && ge[4].out === "" && !ge[3].calls.length && !ge[4].calls.length, JSON.stringify(ge));
 ok("worker guard: bg denied", run(WH("proteus-worker-guard.js"), wpre("Bash", { command: "x", run_in_background: true }), { cwd: WT }).code === 2);
 ok("worker guard: Monitor denied", run(WH("proteus-worker-guard.js"), wpre("Monitor", {}), { cwd: WT }).code === 2);
 ok("worker guard: fg allowed", run(WH("proteus-worker-guard.js"), wpre("Bash", { command: "npm test" }), { cwd: WT }).code === 0);
@@ -1213,11 +1230,23 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   r = run(INST, "", { args: ["--project"], cwd: VE, env: cenv(chome("vp-e")) });
   ok("verify-profiles (e): teams/qa a regular file is skipped: --project exits 0 and the file is untouched", r.code === 0 &&
     fs.readFileSync(vef, "utf8") === "not a dir\n", r.out + r.err);
+  // a roster repo's existing team folder is filled even though ROUTING.md does not name it
+  const VF = vp("f"), vfd = path.join(VF, "teams", "devops");
+  fs.mkdirSync(vfd);
+  r = run(INST, "", { args: ["--project"], cwd: VF, env: cenv(chome("vp-f")) });
+  ok("verify-profiles (f): ROUTING.md without devops and an empty teams/devops/: --project fills it with PROFILE.md, skills.txt and required.txt", r.code === 0 &&
+    ["PROFILE.md", "skills.txt", "required.txt"].every((f) => fs.existsSync(path.join(vfd, f))), fs.readdirSync(vfd).join() + r.out + r.err);
   const VD = vp("d"), vh = cenv(chome("vp-d"));
   run(INST, "", { args: ["--project"], cwd: VD, env: vh });
   fs.rmSync(path.join(VD, "teams", "security"), { recursive: true, force: true });
   d = run(INST, "", { args: ["--doctor"], cwd: VD, env: vh }).out;
   ok("verify-profiles (d): with teams/security deleted, --doctor prints a FIX row naming security and --project", /^FIX .*security.*--project/m.test(d), d);
+  d = run(INST, "", { args: ["--doctor", "--fix"], cwd: VD, env: vh }).out;
+  ok("verify-profiles (d): --doctor --fix puts teams/security/PROFILE.md back and the verify-only row reads ok", fs.existsSync(path.join(VD, "teams", "security", "PROFILE.md")) && /^ok .*verify-only profiles present/m.test(d), d);
+  // a folder that exists without its PROFILE.md is as missing as a deleted one
+  fs.rmSync(path.join(VD, "teams", "qa", "PROFILE.md"));
+  d = run(INST, "", { args: ["--doctor"], cwd: VD, env: vh }).out;
+  ok("verify-profiles (g): teams/qa/ present with PROFILE.md removed: --doctor prints a FIX row naming teams/qa/PROFILE.md", /^FIX .*teams\/qa\/PROFILE\.md.*--project/m.test(d), d);
 
   // (c) sandboxRoots on win32: roots match by samePath, so the drive letter's case does not matter. Elsewhere the child
   // fakes win32 and runs in a temp cwd, where "C:\x\repo\.codex\config.toml" is just a file name; on win32 the repo is
@@ -1233,12 +1262,14 @@ const cx = require(${JSON.stringify(path.join(SRC, "proteus-harness-codex.js"))}
 const p = require("path"); Object.assign(p, p.win32); // after the requires: the module loader needs posix paths
 const root = ${JSON.stringify(CR)}, low = ${JSON.stringify(CL)}, file = root + "\\\\.codex\\\\config.toml";
 const go = (roots) => { fs.writeFileSync(file, "[sandbox_workspace_write]\\nwritable_roots = " + JSON.stringify(roots).replace(/","/g, '", "') + "\\n"); const res = cx.sandboxRoots(root); return { res, text: fs.readFileSync(file, "utf8") }; };
-console.log(JSON.stringify({ same: go([low + "-proteus"]), stale: go([low + "-hive"]), both: go([low + "-hive", low + "-proteus"]) }));`);
+console.log(JSON.stringify({ fwd: go([${JSON.stringify(CL.split("\\").join("/"))} + "-proteus/"]), same: go([low + "-proteus"]), stale: go([low + "-hive"]), both: go([low + "-hive", low + "-proteus"]) }));`);
   const cr = spawnSync(process.execPath, [cjs], { encoding: "utf8", windowsHide: true });
   let cw = {}; try { cw = JSON.parse(cr.stdout); } catch {}
-  const tomlOf = (roots) => "[sandbox_workspace_write]\nwritable_roots = " + JSON.stringify(roots).replace(/","/g, '", "') + "\n";
+  const low0 = CL.split("\\").join("/"), tomlOf = (roots) => "[sandbox_workspace_write]\nwritable_roots = " + JSON.stringify(roots).replace(/","/g, '", "') + "\n";
   ok("installer-fixes (c): win32, c:\\x\\repo-proteus already listed for C:\\x\\repo: roots unchanged, not duplicated",
     !!cw.same && cw.same.res.changed === false && !cw.same.res.error && cw.same.text === tomlOf([CL + "-proteus"]), cr.stderr + JSON.stringify(cw.same));
+  ok("installer-fixes (c): win32, c:/x/repo-proteus/ (forward slashes, trailing slash) already listed for C:\\x\\repo: roots unchanged, not duplicated",
+    !!cw.fwd && cw.fwd.res.changed === false && !cw.fwd.res.error && cw.fwd.text === tomlOf([low0 + "-proteus/"]), cr.stderr + JSON.stringify(cw.fwd));
   ok("installer-fixes (c): win32, a stale c:\\x\\repo-hive with no live worktrees is dropped and the -proteus root added once",
     !!cw.stale && !cw.stale.text.toLowerCase().includes("repo-hive") && cw.stale.text.split("repo-proteus").length === 2, cr.stderr + JSON.stringify(cw.stale));
   ok("installer-fixes (c): win32, a stale -hive root beside a -proteus root in another case: only the -hive root goes",
