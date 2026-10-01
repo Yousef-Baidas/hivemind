@@ -127,5 +127,19 @@ else {
   check("on win32 bin contains claude.cmd", ls.includes("claude.cmd"), ls.join(" "));
 }
 
+// 9. summary() removes the workdir after a green run and keeps it after a red one; each child suite runs in its own process
+const childSuite = (green) => {
+  const code = `const l = require(${JSON.stringify(LIB)}); const w = l.workdir("child"); console.log("WORKDIR " + w); l.ok("child case", ${green}); l.summary();`;
+  const r = cp.spawnSync(process.execPath, ["-e", code], { env: process.env, encoding: "utf8", windowsHide: true, timeout: 120000 });
+  const m = /^WORKDIR (.+)$/m.exec(r.stdout || "");
+  return { dir: m ? m[1] : "", code: r.status, out: `${r.stdout || ""}${r.stderr || ""}` };
+};
+const greenChild = childSuite(true), redChild = childSuite(false);
+check("a green child suite exits 0 and reports its workdir", greenChild.code === 0 && greenChild.dir !== "", greenChild.out);
+check("summary() removes the workdir after a green run", greenChild.dir !== "" && !fs.existsSync(greenChild.dir), greenChild.dir);
+check("a red child suite exits 1 and reports its workdir", redChild.code === 1 && redChild.dir !== "", redChild.out);
+check("summary() keeps the workdir after a red run", redChild.dir !== "" && fs.existsSync(redChild.dir), redChild.dir);
+if (redChild.dir) fs.rmSync(redChild.dir, { recursive: true, force: true });
+
 if (!bad) for (const s of made) if (fs.existsSync(s.dir)) s.cleanup();
 summary();
