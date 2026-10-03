@@ -114,6 +114,16 @@ r = run(LG, pre("Bash", { command: "npm run render", run_in_background: true }, 
 ok("guard: subagent run_in_background denied", r.code === 2 && /never wait on a background notification/.test(r.err), r.err);
 ok("guard: subagent Monitor denied", code(pre("Monitor", { command: "x" }, sub)) === 2);
 ok("guard: subagent --edit-last denied", code(pre("Bash", { command: "gh pr comment 3 --edit-last -b y" }, sub)) === 2);
+// the human's words: an agent's comment opening with ACCEPT, CHANGES or ANSWER is refused, from the lead or a subagent
+const said = (command, extra) => { const res = run(LG, pre("Bash", { command }, extra)); return res.code === 2 && /ACCEPT, CHANGES and ANSWER are the human's words/.test(res.err); };
+ok("guard: an agent's ACCEPT, CHANGES or ANSWER comment is refused, lead and subagent", said("gh issue comment 22 --body ACCEPT") && said("gh issue comment 22 -b 'CHANGES\n- too dark'", sub) &&
+  said('gh issue comment 21 --body "ANSWER 2"') && said("gh pr review 40 --comment -b ACCEPT", sub) && said("gh api repos/o/r/issues/22/comments -f body=ACCEPT"));
+ok("guard: a heredoc or $(cat <<EOF) body is read", said("gh issue comment 22 --body-file - <<'EOF'\nACCEPT\nEOF") && said('gh issue comment 22 --body "$(cat <<\'EOF\'\n  CHANGES\n- x\nEOF\n)"', sub));
+fs.writeFileSync(path.join(REPO, "verdict.md"), "ACCEPT\nall good\n"); fs.writeFileSync(path.join(REPO, "report.md"), "DONE #12\nACCEPT criteria met\n");
+ok("guard: a --body-file under cwd is read", said("gh issue comment 22 --body-file verdict.md") && said("gh issue comment 22 -F verdict.md", sub) && !said("gh issue comment 22 --body-file report.md"));
+ok("guard: other words, other commands and the keyword past line 1 pass", !said("gh issue comment 22 --body 'ACCEPTED criteria are listed below'") && !said('gh issue comment 22 --body "Answered in session: 2"') &&
+  !said("gh issue comment 22 --body 'DONE\nACCEPT would be premature'") && !said("grep -n ACCEPT tracker.md") && !said("gh issue view 22 --json comments -q '.comments[].body | select(test(\"^ACCEPT\"))'") &&
+  !said("gh issue create --title 'Q: x' --body 'ANSWER with 1 or 2'"));
 ok("guard: subagent foreground Bash allowed", code(pre("Bash", { command: "npm test" }, sub)) === 0);
 r = run(LG, pre("Edit", { file_path: path.join(REPO, "src/a.ts") }, sub));
 ok("guard: subagent edit main checkout during run denied", r.code === 2 && /workers edit only inside their worktree \(none found from your cwd; comment NEEDS on the issue and stop\)\. src\/a\.ts is in the main checkout/.test(r.err), r.err);
@@ -869,6 +879,7 @@ ok("commit-msg: trailer", cm("fix: x\n\nCo-Authored-By: Claude <x>\n") === 1);
   ok("codex guard: a patch of lead docs only is allowed", cg(cpre("apply_patch", patch("AGENTS.md", "docs/adr/0001-x.md"))).code === 0);
   ok("codex guard: apply_patch run through the shell is an edit", cg(cpre("Bash", { command: "apply_patch <<'EOF'\n" + patch("src/b.ts").command + "\nEOF" })).code === 2);
   ok("codex guard: plain shell allowed, --edit-last denied", cg(cpre("Bash", { command: "git status" })).code === 0 && cg(cpre("Bash", { command: "gh issue comment 3 --edit-last -b x" })).code === 2);
+  ok("codex guard: an ACCEPT comment denied", cg(cpre("Bash", { command: "gh issue comment 3 --body ACCEPT" })).code === 2);
   r = cg(cpre("spawn_agent", { message: "x", agent_type: "proteus-worker", model: "gpt-6-luna" }));
   ok("codex guard: single-model mode, a spawn on another model is denied", r.code === 2 && /not on the ladder \(gpt-6-sol\)/.test(r.err), r.err);
   ok("codex guard: single-model mode, the lead's model is allowed", cg(cpre("spawn_agent", { message: "x", model: "gpt-6-sol" }, { transcript_path: null })).code === 0);

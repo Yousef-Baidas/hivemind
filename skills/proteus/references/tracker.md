@@ -44,7 +44,7 @@ Trusted means the keyword alone on the first line (`ACCEPTED` is not `ACCEPT`), 
 
 Read tracker output with `--json … -q` always. A raw `gh issue view` costs the lead more than the ticket did.
 
-Every agent posts as the same GitHub account, so a comment is never edited or overwritten: no `gh … --edit-last`, no `gh api -X PATCH` on a comment. A correction is a new comment. The guards refuse `--edit-last`. While that account is also the human's, the verdict script cannot tell an agent's `ACCEPT` from the human's and says `identity=shared` on stderr.
+Every agent posts as the same GitHub account, so a comment is never edited or overwritten: no `gh … --edit-last`, no `gh api -X PATCH` on a comment. A correction is a new comment. The guards refuse `--edit-last`. While that account is also the human's, the verdict script cannot tell an agent's `ACCEPT` from the human's and says `identity=shared` on stderr. So the guards refuse an agent's `gh` comment, PR review or comments API call whose body opens with `ACCEPT`, `CHANGES` or `ANSWER` (inline, heredoc, or `--body-file` under the cwd). That stops a confused or injected agent, not a determined one: a script can still post. Agents posting under a login of their own closes it.
 
 ## Adding a tracker
 
