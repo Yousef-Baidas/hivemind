@@ -2,22 +2,32 @@
 
 Rules in prompts drift. These make the important ones mechanical. Templates ship in `teams/templates/` (copied by `install.js --project`); the scaffold or stabilise ticket installs them once. §3–6 and §8 apply to every domain; §1 CI applies wherever the checks run headless; §7, §9, §10 are code-only (other domains get their deep pass from the team rubric in `domains.md`).
 
-## 1. CI on every ticket PR + branch protection
+## 1. CI on every ticket PR + run-branch rules
 
-Scaffold ticket: copy `teams/templates/ci/proteus-gates.yml` to `.github/workflows/`, replace every `EDIT` line with the gate commands from `## Learned`, commit. Then, per run, right after `git push -u origin proteus/<run>`:
+Scaffold ticket: copy `teams/templates/ci/proteus-gates.yml` to `.github/workflows/`, replace every `EDIT` line with the gate commands from `## Learned`, commit.
+
+What binds `proteus/<run>` is the human's, set once per repo: `install.js --protect`, run by an admin of the repo, adds the ruleset "proteus runs" on `proteus/*` (a PR with `gates` green, no force push, nobody bypasses, admins included) and gives the agents' own GitHub account write access. Worker branches are `proteus-work/<run>/<id>`, outside the pattern. Per run, right after `git push -u origin proteus/<run>`, check that it binds:
+
+```
+gh api "repos/{owner}/{repo}/rules/branches/proteus%2F<run>" --jq '[.[].type]'
+```
+
+`pull_request`, `required_status_checks` and `non_fast_forward` all listed → done. Otherwise fall back to protecting the branch itself:
 
 ```
 gh api -X PUT "repos/{owner}/{repo}/branches/proteus%2F<run>/protection" \
   --input - <<'EOF'
 {"required_status_checks":{"strict":false,"contexts":["gates"]},
  "required_pull_request_reviews":null,
- "enforce_admins":false,"restrictions":null}
+ "enforce_admins":true,"restrictions":null}
 EOF
 ```
 
-Now no PR merges into `proteus/<run>` without the `gates` check green. `strict` is off: merges are sequential and the full suite runs on `proteus/<run>` after each one, so requiring every ticket branch to be up to date first would only add an update-branch and a fresh CI run per PR. Required reviews are not set: worker, verifier, and lead share one `gh` login, and GitHub refuses `--approve` on your own PR, so the verifier's `MERGE` is a review comment and a record, not a lock. Verifier reads `gh pr checks <pr> --json name,state` instead of re-running the suite; it re-runs only what it needs to reproduce a finding, or the whole suite when the checks list is empty.
+The PUT needs an admin's login. Under the agents' own account (`identity=separate` in `proteus-state`) it fails with 403 or 404, as it should: tell the human once to run `install.js --protect`, and continue with prompt-enforced gates until they do. Under `identity=shared` it succeeds, and `enforce_admins` makes it bind your own login too; but that login can delete it, so it stops a slip, not a decision. It also fails on a private repo on GitHub Free, which has no rulesets either, and `gates` never reports when Actions is disabled. Either → write `protection: none` under `AGENTS.md ## Learned` once, tell the human once, continue with prompt-enforced gates; the verifier then runs the suite itself.
 
-The PUT fails on a private repo on GitHub Free (403) and `gates` never reports when Actions is disabled. Either → write `protection: none` under `AGENTS.md ## Learned` once, tell the human once, continue with prompt-enforced gates; the verifier then runs the suite itself. Delete the protection with `gh api -X DELETE …/protection` at close before deleting the branch.
+Now no PR merges into `proteus/<run>` without the `gates` check green. `strict` is off: merges are sequential and the full suite runs on `proteus/<run>` after each one, so requiring every ticket branch to be up to date first would only add an update-branch and a fresh CI run per PR. Required reviews are not set: worker, verifier and lead share one `gh` login, and GitHub refuses `--approve` on your own PR, so the verifier's `MERGE` is a review comment and a record, not a lock (a verifier approving as a GitHub App is #69). Verifier reads `gh pr checks <pr> --json name,state` instead of re-running the suite; it re-runs only what it needs to reproduce a finding, or the whole suite when the checks list is empty.
+
+At close, delete the protection with `gh api -X DELETE …/protection` before deleting the branch, only if the PUT set it; the ruleset stays.
 
 ## 2. Path ownership hook
 

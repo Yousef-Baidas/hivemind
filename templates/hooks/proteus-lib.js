@@ -245,6 +245,13 @@ function writeJSON(file, obj) {
 
 const configFile = () => path.join(os.homedir(), ".claude", "proteus.json");
 const proteusConfig = () => readJSON(configFile(), {}) || {};
+// the gh config dir the agents post from ("agentGh" in proteus.json, a leading ~ allowed): a GitHub login of
+// their own, set up by install.js --agent-login. "" while they post under the human's.
+function agentGhDir() {
+  const d = proteusConfig().agentGh;
+  if (typeof d !== "string" || !d.trim()) return "";
+  return path.resolve(d.trim().replace(/^~(?=$|[\\/])/, () => os.homedir()));
+}
 
 // repo-relative path with forward slashes; null when outside root (incl. another drive on Windows)
 function relPath(root, target) {
@@ -317,8 +324,11 @@ const execOpts = (cwd, timeout, env) => ({ cwd, encoding: "utf8", timeout, windo
 function git(args, cwd, timeout = 3000) {
   try { return execFileSync("git", args, execOpts(cwd, timeout)).trim(); } catch { return ""; }
 }
-function gh(args, cwd, timeout = 6000) {
-  try { return execFileSync("gh", args, execOpts(cwd, timeout, { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1" })).trim(); } catch { return ""; }
+// configDir: a GH_CONFIG_DIR to run under (agentGhDir() runs it as the agents), else this process's login
+function gh(args, cwd, timeout = 6000, configDir = "") {
+  const env = { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1" };
+  if (configDir) env.GH_CONFIG_DIR = configDir;
+  try { return execFileSync("gh", args, execOpts(cwd, timeout, env)).trim(); } catch { return ""; }
 }
 
 const envInt = (name, dflt) => { const n = parseInt(process.env[name], 10); return Number.isFinite(n) && n > 0 ? n : dflt; };
@@ -456,7 +466,7 @@ module.exports = {
   readInbox, refreshInbox, inboxFile,
   run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, stateDir, readJSON, writeJSON,
   CURRENT, LEGACY, SCHEMES, schemeOf, runName, runRefs, runBranches, legacyStateDir, legacyWorktreeDir, legacyWorktrees, migrateState,
-  configFile, proteusConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
+  configFile, proteusConfig, agentGhDir, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
   workerDenial, verdictPost, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, syncText, WAIT_MSG, EDIT_LAST_MSG,
 };
 try { harness(); } catch {}

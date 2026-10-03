@@ -10,6 +10,7 @@ The skill is written in Claude Code's names. On Codex CLI (you spawn with `spawn
 | `<hooks>`: hooks and lead scripts | `.claude/hooks` | `.codex/hooks` |
 | Owned-paths file | `<wt>/.claude/proteus-owned` | `<wt>/.codex/proteus-owned` (read-only to the worker's sandbox) |
 | Worktree folder `../<repo>-proteus/` | writable | writable because `install.js --project --harness codex` adds it to `[sandbox_workspace_write] writable_roots` in `.codex/config.toml`; `--doctor` checks it |
+| Agents' GitHub login | `GH_CONFIG_DIR` from the autostart's `CLAUDE_ENV_FILE`, this session | under `[shell_environment_policy.set]` in `.codex/config.toml`, written by the autostart and read from the next session; it applies to every Codex session in the project, `PROTEUS=0` ones too, and only in a trusted project |
 | Lead hook registration | `.claude/settings.local.json` | `.codex/hooks.json` plus `.codex/rules/proteus.rules`; the human trusts the project and approves the hooks in `/hooks` once |
 | Plain session, no lead hooks | `PROTEUS=0 claude` | `PROTEUS=0 codex` |
 | Agent definitions | `.claude/agents/*.md`; a project may pin tools or a model | TOML roles in `$CODEX_HOME/agents`, no model and no tool limits: verifiers stay read-only by instruction only |

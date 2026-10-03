@@ -17,7 +17,7 @@ Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the secon
 | map | `/wayfinder` writes its map as an issue labelled `wayfinder:map`; the repo gets no map file |
 | milestone | `gh api repos/{owner}/{repo}/milestones -f title="<run>/<milestone>"` |
 | ticket | `gh issue create --title "<id>: <intent line>" --label proteus,profile:<team>,difficulty:<d> --milestone "<run>/<m>" --body-file -` (body: intent, interface, the check as name + input + expected result, owned paths, depends-on; `needs-research` label when it rests on outside facts) |
-| protect branch (per run) | after `git push -u origin proteus/<run>`: `gh api -X PUT "repos/{owner}/{repo}/branches/proteus%2F<run>/protection" --input -` with the JSON in `enforcement.md` §1; requires check `gates` green. 403 → `protection: none` in `## Learned`, continue |
+| protect branch (per run) | after `git push -u origin proteus/<run>`: `gh api "repos/{owner}/{repo}/rules/branches/proteus%2F<run>"` shows the human's ruleset → done; else `gh api -X PUT "repos/{owner}/{repo}/branches/proteus%2F<run>/protection" --input -` with the JSON in `enforcement.md` §1. 403 or 404 → the human runs `install.js --protect`, or `protection: none` in `## Learned`; continue |
 | ticket url → worker | the issue number is the ticket id; the worker gets the number, not the body pasted |
 | worker report | `gh issue comment <n> --body "DONE …"` / `NEEDS …` / `RED …` + diff and failing output |
 | CI status | `gh pr checks <pr> --json name,state`; verifier reads it, re-runs only to reproduce a finding |
@@ -32,7 +32,7 @@ Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the secon
 | accept | remove `needs-human`, close the review issue, close the milestone |
 | queue (unattended) | review issues still labelled `needs-human`; `/proteus-review` lists `gh issue list --label needs-human --state open` |
 | learned | still `AGENTS.md ## Learned`; that file is for the next human too |
-| close run | PR `proteus/<run>` → `main`, body links the milestones; `gh api -X DELETE "repos/{owner}/{repo}/branches/proteus%2F<run>/protection"` then `git push origin --delete proteus-evidence/<run>` after merge |
+| close run | PR `proteus/<run>` → `main`, body links the milestones; `gh api -X DELETE "repos/{owner}/{repo}/branches/proteus%2F<run>/protection"` if the run set it, then `git push origin --delete proteus-evidence/<run>` after merge |
 
 Verdict poll, background shell; prints the first trusted verdict and exits (Codex runs it without `--wait`: `harnesses.md`):
 
@@ -44,7 +44,7 @@ Trusted means the keyword alone on the first line (`ACCEPTED` is not `ACCEPT`), 
 
 Read tracker output with `--json … -q` always. A raw `gh issue view` costs the lead more than the ticket did.
 
-Every agent posts as the same GitHub account, so a comment is never edited or overwritten: no `gh … --edit-last`, no `gh api -X PATCH` on a comment. A correction is a new comment. The guards refuse `--edit-last`. While that account is also the human's, the verdict script cannot tell an agent's `ACCEPT` from the human's and says `identity=shared` on stderr. So the guards refuse an agent's `gh` comment, PR review or comments API call whose body opens with `ACCEPT`, `CHANGES` or `ANSWER` (inline, heredoc, or `--body-file` under the cwd). That stops a confused or injected agent, not a determined one: a script can still post. Agents posting under a login of their own closes it.
+Every agent posts as the same GitHub account, so a comment is never edited or overwritten: no `gh … --edit-last`, no `gh api -X PATCH` on a comment. A correction is a new comment. The guards refuse `--edit-last`. While that account is also the human's, the verdict script cannot tell an agent's `ACCEPT` from the human's and says `identity=shared` on stderr. So the guards refuse an agent's `gh` comment, PR review or comments API call whose body opens with `ACCEPT`, `CHANGES` or `ANSWER` (inline, heredoc, or `--body-file` under the cwd). That stops a confused or injected agent, not a determined one: a script can still post. Agents posting under a login of their own closes it: after `install.js --agent-login`, every agent shell runs `gh` as that account (`identity=separate` in `proteus-state`) and the verdict script counts only the login recorded as `human`.
 
 ## Adding a tracker
 

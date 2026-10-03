@@ -144,7 +144,8 @@ The tracker is GitHub via `gh` today. `references/tracker.md` is an operations t
 
 Rules in prompts drift; these are mechanical.
 
-- **Branch protection + CI.** The scaffold ticket adds `.github/workflows/proteus-gates.yml`; every run protects `proteus/<run>` so a PR needs the `gates` check green before GitHub lets it merge. The verifier's `MERGE` is a review comment on the PR (one login cannot approve its own PR).
+- **Run-branch rules + CI.** The scaffold ticket adds `.github/workflows/proteus-gates.yml`. `install.js --protect` (once per repo, by its admin) adds a ruleset so nothing reaches a `proteus/<run>` branch except a PR with the `gates` check green, nothing force-pushes it, and nobody bypasses it, you included; without it the lead protects each run branch itself when its login can. The verifier's `MERGE` is a review comment on the PR (one login cannot approve its own PR; #69).
+- **Agents under their own login.** `install.js --agent-login` signs a second GitHub account, one you create for the agents, into a gh config of its own (`~/.config/gh-proteus`, the token in a file there). From the next session every agent shell command runs `gh` as that account, so only your login's `ACCEPT` counts and the agents cannot lift the ruleset; `proteus-state` says `identity=separate`. Without it they post as you (`identity=shared`), and only the guards tell their words from yours.
 - **Path ownership.** A `PreToolUse` hook in each worker's worktree refuses any edit outside the ticket's owned paths and tells the worker to file `NEEDS` instead; the verifier also refuses a diff outside the team's `Owns`.
 - **No silent waiting.** Workers cannot background a job and wait for a notification; a stop that says "waiting" is sent back; the lead arms a stall timer per wave.
 - **Commit messages.** lefthook runs a commit-msg check: Conventional Commits, 72 chars, no AI trailer. CI re-checks every commit in the PR, so `--no-verify` does not help.
@@ -268,7 +269,19 @@ node ~/proteus/install.js --doctor         # from a repo root: global and projec
 node ~/proteus/install.js --doctor --fix   # repair links, duplicates, context-mode, hook registration, team skills
 ```
 
-Each line is `ok`, `WARN`, or `FIX`; the exit code is 1 while a `FIX` remains. It checks Node 22.5+, the context-mode plugin (installed and enabled), the skill links and duplicates, agents, attribution, agent teams, `gh` auth, leftovers from hivemind (and repos still on it), the project hooks, `ROUTING.md`, that every listed team skill resolves, and that the commit-msg gate in `lefthook.yml` and `proteus-gates.yml` runs a file git tracks.
+Each line is `ok`, `WARN`, or `FIX`; the exit code is 1 while a `FIX` remains. It checks Node 22.5+, the context-mode plugin (installed and enabled), the skill links and duplicates, agents, attribution, agent teams, `gh` auth, leftovers from hivemind (and repos still on it), the project hooks, `ROUTING.md`, that every listed team skill resolves, that the commit-msg gate in `lefthook.yml` and `proteus-gates.yml` runs a file git tracks, whose login the agents post under, and in a project whether a ruleset binds `proteus/*` and the agents' account can push.
+
+### Agents under their own login (recommended)
+
+```bash
+node ~/proteus/install.js --agent-login   # once per machine: sign in the agents' GitHub account
+cd /path/to/your/repo
+node ~/proteus/install.js --protect       # once per repo, as its admin: invite that account, add the ruleset
+```
+
+Create the agents' account first, a second GitHub account you control (GitHub allows one machine account per person beside your own), and sign in to it in a private browser window when `gh` shows the device code. `--agent-login` keeps its token in a file in `~/.config/gh-proteus` (only you can read the folder; `gh`'s keyring slot is shared by every config, so a second keyring login would replace yours) and records both logins in `~/.claude/proteus.json`. `--protect` gives the account write access, never admin, and adds the ruleset "proteus runs" (`enforcement.md` §1). Rulesets need a public repo, or a paid plan for a private one.
+
+Git pushes from agent shells go through whatever credential git uses: answer yes when `gh auth login` offers to set up git and HTTPS remotes push as the agents' account too; with SSH they push with your key, and the ruleset still binds them.
 
 ### Manual install (any platform)
 
