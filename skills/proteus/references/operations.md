@@ -13,7 +13,7 @@ Reply with those two parts on one line. Nothing is dispatched, nothing is re-rea
 
 ## `questions` / `inbox`
 
-`node <hooks>/proteus-inbox.js --refresh` lists open question and review issues. For each question, in order: read its body (`--json body -q .body`), present it with `AskUserQuestion` (its options, the recommendation first; Codex: as a plain numbered question), post the pick as `ANSWER <pick>` on the issue, act on it. Reviews are listed with a pointer to `/proteus-review`; you never relay one. Four questions per picker at most; more → the next picker.
+`node <hooks>/proteus-inbox.js --refresh` lists open question and review issues. For each question, in order: read its body (`--json body -q .body`), present it with `AskUserQuestion` (its options, the recommendation first; Codex: as a plain numbered question), post it on the issue as `Answered in session: <pick>` (never `ANSWER`, which only the human's login posts), act on it. Reviews are listed with a pointer to `/proteus-review`; you never relay one. Four questions per picker at most; more → the next picker.
 
 ## `pause` / `resume`
 

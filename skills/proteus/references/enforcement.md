@@ -81,7 +81,7 @@ Lead (main checkout):
 - `proteus-scratch.js` (`PreToolUse`, `PostToolUse`, `PostToolUseFailure` on `Bash`, subagents included): ledgers each new entry directly in the temp dir that this user owns and the command or its output names; `--path`, `--sweep` and `--size` from the command line (`operations.md`). Only a sweep deletes, and only what the ledger or the scratch dir holds.
 - `proteus-stall.js` (`SubagentStop`, `TeammateIdle`; Codex `SubagentStop` only): refuses a stop that ends waiting on a background job instead of reporting (`operations.md`).
 - `proteus-statusline.js` (status line): appends `proteus: N questions · M reviews` to your own status line while any are open; it reads a cache and refreshes it in the background at most once a minute. Registered only when the project has no `statusLine` of its own. Codex has no scriptable status line; `inbox=` in `proteus-state` carries the count.
-- Not hooks: `proteus-status.js` (the `status` command), `proteus-inbox.js` (`--refresh` lists open questions and reviews; the `questions` command), `proteus-worktree.js` (§2).
+- Not hooks: `proteus-status.js` (the `status` command), `proteus-inbox.js` (`--refresh` lists open questions and reviews; the `questions` command), `proteus-verdict.js` (the trusted verdict or answer on an issue, `tracker.md`), `proteus-worktree.js` (§2).
 
 Worker worktree (written by `proteus-worktree.js`, a backup for sessions opened inside a worktree): `proteus-owned-paths.js` (§2), `proteus-worker-guard.js` (no `run_in_background`, no `Monitor`, no `--edit-last`), `proteus-lessons.js`, `proteus-scratch.js`, `proteus-stall.js` on `Stop`.
 
