@@ -9,13 +9,13 @@ Scaffold ticket: copy `teams/templates/ci/proteus-gates.yml` to `.github/workflo
 ```
 gh api -X PUT "repos/{owner}/{repo}/branches/proteus%2F<run>/protection" \
   --input - <<'EOF'
-{"required_status_checks":{"strict":true,"contexts":["gates"]},
+{"required_status_checks":{"strict":false,"contexts":["gates"]},
  "required_pull_request_reviews":null,
  "enforce_admins":false,"restrictions":null}
 EOF
 ```
 
-Now no PR merges into `proteus/<run>` without the `gates` check green. Required reviews are not set: worker, verifier, and lead share one `gh` login, and GitHub refuses `--approve` on your own PR, so the verifier's `MERGE` is a review comment and a record, not a lock. Verifier reads `gh pr checks <pr> --json name,state` instead of re-running the suite; it re-runs only what it needs to reproduce a finding, or the whole suite when the checks list is empty.
+Now no PR merges into `proteus/<run>` without the `gates` check green. `strict` is off: merges are sequential and the full suite runs on `proteus/<run>` after each one, so requiring every ticket branch to be up to date first would only add an update-branch and a fresh CI run per PR. Required reviews are not set: worker, verifier, and lead share one `gh` login, and GitHub refuses `--approve` on your own PR, so the verifier's `MERGE` is a review comment and a record, not a lock. Verifier reads `gh pr checks <pr> --json name,state` instead of re-running the suite; it re-runs only what it needs to reproduce a finding, or the whole suite when the checks list is empty.
 
 The PUT fails on a private repo on GitHub Free (403) and `gates` never reports when Actions is disabled. Either → write `protection: none` under `AGENTS.md ## Learned` once, tell the human once, continue with prompt-enforced gates; the verifier then runs the suite itself. Delete the protection with `gh api -X DELETE …/protection` at close before deleting the branch.
 
