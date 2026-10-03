@@ -210,6 +210,18 @@ const REPO4 = path.join(W, "repo4"); fs.mkdirSync(REPO4); g(REPO4, "init", "-q",
 ok("guard sub: main checkout with no run allowed", run(LG, pre("Edit", { file_path: "src/a.ts" }, { ...sub, cwd: REPO4 }), { cwd: REPO4 }).code === 0);
 fs.writeFileSync(path.join(REPO4, ".git", "packed-refs"), "# pack-refs with: peeled fully-peeled sorted\n0123456789abcdef0123456789abcdef01234567 refs/heads/proteus/run9\n");
 ok("guard sub: packed proteus/* ref counts as a run", run(LG, pre("Edit", { file_path: "src/a.ts" }, { ...sub, cwd: REPO4 }), { cwd: REPO4 }).code === 2);
+// worker branches proteus-work/<run>/<id>, loose and packed, name the key <run>-<id> and are never a run
+{
+  const HL = require(path.join(H, "proteus-lib.js"));
+  const R5 = path.join(W, "repo5"), heads = path.join(R5, ".git", "refs", "heads"), sha = "0123456789abcdef0123456789abcdef01234567\n";
+  fs.mkdirSync(path.join(heads, "proteus-work", "bl9"), { recursive: true }); fs.mkdirSync(path.join(heads, "proteus"), { recursive: true });
+  fs.writeFileSync(path.join(heads, "proteus", "bl9"), sha); fs.writeFileSync(path.join(heads, "proteus-work", "bl9", "3"), sha);
+  fs.writeFileSync(path.join(R5, ".git", "packed-refs"), `# pack-refs with: peeled fully-peeled sorted\n${sha.trim()} refs/heads/proteus-work/bl9/4\n`);
+  const C5 = path.join(R5, ".git");
+  ok("lib: proteus-work/<run>/<id> refs are read, loose and packed", JSON.stringify(HL.runRefs(C5)) === JSON.stringify(["proteus-work/bl9/3", "proteus-work/bl9/4", "proteus/bl9"]), JSON.stringify(HL.runRefs(C5)));
+  ok("lib: a worker branch is never a run branch", JSON.stringify(HL.runBranches(C5)) === JSON.stringify(["proteus/bl9"]));
+  ok("lib: proteus-work/<run>/<id> names <run>-<id> on the current scheme", HL.runName("proteus-work/bl9/3") === "bl9-3" && HL.schemeOf("proteus-work/bl9/3") === HL.CURRENT && HL.runName("proteus/bl9-3") === "bl9-3" && HL.schemeOf("main") === null);
+}
 // Windows semantics, in-process: path swapped to win32, a list file named with backslashes in a temp cwd
 const WIN = path.join(W, "win"); fs.mkdirSync(WIN);
 fs.writeFileSync(path.join(WIN, "C:\\wt\\.claude\\proteus-owned"), "src/lighting/\r\ntests\\lighting.test.ts\r\n");
