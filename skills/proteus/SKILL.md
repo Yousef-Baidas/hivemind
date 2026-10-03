@@ -44,7 +44,7 @@ Worker traffic scrolls a question out of sight, so a question never lives only i
 
 - **The run cannot move without the answer** (grilling, roster approval, the information gate): `AskUserQuestion`, one to four questions per call, options concrete, your recommendation first and marked. The picker stays pinned at the input until answered. Codex has no picker: ask them as plain numbered questions (`harnesses.md`).
 - **Everything else** (a parked `NEEDS`, a dependency request with its OSV result, `CONTRACT-UNCLEAR` you cannot settle, a missing `ROUTING.md` row, a proposed roster change): a question issue (`tracker.md`) with options, recommendation, and what is parked on it. Park only the tickets that depend on it and keep dispatching the rest. `PushNotification` once. The status line shows the count; the human answers in `/proteus-review`, on GitHub, or by typing `questions` here.
-- An answer arrives as `ANSWER …` on the issue: act on it, close the issue, log it on the run log. An answer that states a standing rule ("always", "never") is also a line in `CONVENTIONS.md` (the human's approval) or a lesson, so the same question is never asked twice.
+- An answer arrives as `ANSWER …` from the human's login (`proteus-verdict.js`, `tracker.md`): act on it, close the issue, log it on the run log. An answer that states a standing rule ("always", "never") is also a line in `CONVENTIONS.md` (the human's approval) or a lesson, so the same question is never asked twice.
 - Ask only what a settled default, `## Learned`, a lesson, `CONVENTIONS.md`, or `/research` cannot answer. Batch: one question issue per decision, never one per worker message.
 
 ## Commands

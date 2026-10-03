@@ -331,7 +331,26 @@ function workerDenial(ev) {
   if (ev.tool !== "shell") return null;
   if (ev.background) return WAIT_MSG;
   if (/--edit-last\b/.test(ev.command)) return EDIT_LAST_MSG;
-  return null;
+  return verdictPost(ev.command, ev.cwd);
+}
+
+// ACCEPT, CHANGES and ANSWER are the human's words (proteus-verdict.js): an agent's gh comment, PR review or
+// comments API call whose body opens with one is refused. The body is read from --body/-b, a body= field, a
+// heredoc, or a --body-file/-F file under cwd. A guard, not a boundary: the verdict script's author check is.
+const HUMAN_WORD = /^\s*(ACCEPT|CHANGES|ANSWER)(?=\s|$)/;
+const VERDICT_MSG = "proteus: ACCEPT, CHANGES and ANSWER are the human's words; agents never post them. Report to the lead, word the comment differently, or record a pick the human made in this session as `Answered in session: <pick>`.";
+function verdictPost(command, cwd) {
+  const cmd = String(command || "");
+  if (!/\bgh\s+((issue|pr)\s+(comment|review)|api)\b/.test(cmd) || !/ACCEPT|CHANGES|ANSWER|--body-file|-F\b/.test(cmd)) return null;
+  const unq = (v) => v.replace(/^\$?(["'])([\s\S]*)\1$/, "$2").replace(/\\(["\\$`])/g, "$1").replace(/\\n/g, "\n");
+  const bodies = [];
+  for (const m of cmd.matchAll(/(?:--body|-b|(?:-f|-F|--field|--raw-field)\s+body)(?:\s+|=)("(?:[^"\\]|\\.)*"|\$?'[^']*'|\S+)/g)) bodies.push(unq(m[1]));
+  for (const m of cmd.matchAll(/<<-?\s*(["']?)(\w+)\1[^\n]*\n([\s\S]*?)(?:\n\s*\2\s*(?:\n|$)|$)/g)) bodies.push(m[3]);
+  for (const m of cmd.matchAll(/(?:--body-file|-F)(?:\s+|=)(["']?)([^\s"']+)\1/g)) {
+    if (m[2] === "-" || m[2].includes("=")) continue;
+    try { bodies.push(fs.readFileSync(path.resolve(cwd || ".", m[2]), "utf8").slice(0, 4096)); } catch {}
+  }
+  return bodies.some((b) => HUMAN_WORD.test(b.replace(/^\$\(\s*cat\s*<<[\s\S]*$/, ""))) ? VERDICT_MSG : null;
 }
 
 // copy src → dst only when the bytes differ; true when written
@@ -438,6 +457,6 @@ module.exports = {
   run, projectRoot, isLinked, isLead, gitCommonDir, mainRoot, stateDir, readJSON, writeJSON,
   CURRENT, LEGACY, SCHEMES, schemeOf, runName, runRefs, runBranches, legacyStateDir, legacyWorktreeDir, legacyWorktrees, migrateState,
   configFile, proteusConfig, relPath, gitRoot, runOpen, ownedFile, ownedMatch, ownedDenial, tailLines, envInt, git, gh,
-  workerDenial, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, syncText, WAIT_MSG, EDIT_LAST_MSG,
+  workerDenial, verdictPost, rungOf, leadModel, saveLead, modelPolicy, modelCaps, syncFile, syncText, WAIT_MSG, EDIT_LAST_MSG,
 };
 try { harness(); } catch {}

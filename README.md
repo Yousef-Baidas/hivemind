@@ -28,7 +28,7 @@ Three rules hold in every domain: everything reproducible lives in git (scripts,
 `install.js --project` registers the lead's hooks in the repo's `.claude/settings.local.json` (machine-local, untracked):
 
 - **Autostart.** Every session opened in the repo begins as the lead, skill loaded, no `/proteus` typed. It prints a `proteus-state` line from local files (docs present, skills scouted and linked, gates installed, open `proteus/*` branches, root docs over budget, lessons, Proteus updates), so the lead skips what is already set up.
-- **Lead guard.** On the main thread, edits inside the repo are refused except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, ADRs, and lessons; an Agent call with no model, above the lead's, on a once-per-project model, or under the floor is refused; `gh … --edit-last` is refused (every agent posts as you, so an edit can overwrite a ruling). The lead does not open images itself (each render costs it ~1.5k tokens; a subagent or you judge it) unless you name the file. Inside subagents it refuses `run_in_background` and `Monitor` (a worker that waits on a background notification never wakes up) and any edit outside the worker's owned paths.
+- **Lead guard.** On the main thread, edits inside the repo are refused except `CONTEXT.md`, `CONVENTIONS.md`, `AGENTS.md`, ADRs, and lessons; an Agent call with no model, above the lead's, on a once-per-project model, or under the floor is refused; `gh … --edit-last` is refused (every agent posts as you, so an edit can overwrite a ruling), and so is an agent's comment opening with `ACCEPT`, `CHANGES` or `ANSWER`: those are your words. The lead does not open images itself (each render costs it ~1.5k tokens; a subagent or you judge it) unless you name the file. Inside subagents it refuses `run_in_background` and `Monitor` (a worker that waits on a background notification never wakes up) and any edit outside the worker's owned paths.
 - **Journal and meter.** Every message you type is kept verbatim in `.git/proteus/`; context is metered from the transcript, with a warning at 150k and a hard stop on new dispatch at 180k.
 - **Lessons.** Solved problems are recalled only when their trigger fires (below).
 - **Stall check.** A worker that ends its turn "waiting" instead of reporting is sent back to finish.
@@ -125,6 +125,8 @@ You review through whichever channel fits:
 - **Phone** — `/remote-control` on that review session, or the GitHub app: read the issue, comment `ACCEPT`.
 - **Issue only** — read the brief on GitHub, comment `ACCEPT` or `CHANGES` plus one line per problem. No AI involved.
 - **Evidence only** — flip through the linked screenshots, then comment.
+
+Only comments from your GitHub login count: on a public repo a stranger's `ACCEPT` is ignored, and so is `ACCEPTED`; the keyword stands alone on the first line. If the agents post under an account of their own, name yours as `"human": "<login>"` in `~/.claude/proteus.json`.
 
 `ACCEPT` moves on; `CHANGES` turns each line into a ticket and runs the loop again, or runs revision mode when the changes are small tweaks. Verifier follow-ups never become a pile of tickets: they go on one debt issue per milestone, and at close you fix, re-scope, or drop every line. Merging `proteus/<run>` into `main` is always yours; the lead opens the PR.
 
@@ -326,6 +328,7 @@ templates/
     proteus-lessons.js      trigger-based lesson recall
     proteus-stall.js  proteus-worker-guard.js  no waiting on background jobs, one report per agent
     proteus-status.js  proteus-inbox.js  proteus-statusline.js   status, open questions, status line
+    proteus-verdict.js      reads a verdict or answer only from the human's login
     proteus-worktree.js     prepares a worker worktree and its hooks
     proteus-scratch.js      ledgers and sweeps agents' temp files
     proteus-owned-paths.js  commit-msg.js  proteus-lib.js   shared core

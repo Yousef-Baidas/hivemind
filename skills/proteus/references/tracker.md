@@ -25,8 +25,8 @@ Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the secon
 | merge | `git worktree remove <wt>` first, then `gh pr merge <pr> --merge --delete-branch` into `proteus/<run>`, full suite on `proteus/<run>`; `gh issue close <n>` |
 | review brief | `gh issue create --title "Review: <run>/<milestone>" --label proteus-review,needs-human --milestone … --body-file <brief>` |
 | evidence | text transcripts inline in the brief. Screenshots and recordings go on branch `proteus-evidence/<run>`: first milestone `git checkout --orphan`, later ones `git fetch origin proteus-evidence/<run> && git checkout FETCH_HEAD`; add files, commit, `git push origin HEAD:refs/heads/proteus-evidence/<run>`; link raw URLs; branch deleted at close |
-| verdict | human comment on the review issue whose first line is `ACCEPT` or `CHANGES`; unattended guide comments `AUTO-ACCEPT` / `AUTO-HOLD` |
-| question | `gh issue create --title "Q: <run>: <one line>" --label proteus-question,needs-human --body-file -` (body: the question, numbered options, `Recommended: <n> because …`, parked tickets `#…`, what happens on each option). Answer: a comment whose first line is `ANSWER <option or text>`; the lead acts, logs it on the run log, closes the issue. Never edited, never asked twice |
+| verdict | a comment on the review issue by the human's login whose first line is `ACCEPT` or `CHANGES`; unattended guide comments `AUTO-ACCEPT` / `AUTO-HOLD`. Read only through `proteus-verdict.js` (under the table) |
+| question | `gh issue create --title "Q: <run>: <one line>" --label proteus-question,needs-human --body-file -` (body: the question, numbered options, `Recommended: <n> because …`, parked tickets `#…`, what happens on each option). Answer: a comment by the human's login whose first line is `ANSWER <option or text>`, read with `node <hooks>/proteus-verdict.js <n>`; the lead acts, logs it on the run log, closes the issue. Never edited, never asked twice |
 | revision | `gh issue create --title "Revision <run>/<m> r<k>" --label proteus --milestone …`; one comment per tweak, evidence, and human `ok` (`operations.md`) |
 | wait for verdict | poll every 30 s with the command under the table |
 | accept | remove `needs-human`, close the review issue, close the milestone |
@@ -34,15 +34,17 @@ Tracker today: **GitHub** via `gh`. Jira and others slot in by filling the secon
 | learned | still `AGENTS.md ## Learned`; that file is for the next human too |
 | close run | PR `proteus/<run>` → `main`, body links the milestones; `gh api -X DELETE "repos/{owner}/{repo}/branches/proteus%2F<run>/protection"` then `git push origin --delete proteus-evidence/<run>` after merge |
 
-Verdict poll, background shell, exits on the first verdict comment (Codex cannot run it: `harnesses.md`):
+Verdict poll, background shell; prints the first trusted verdict and exits (Codex runs it without `--wait`: `harnesses.md`):
 
 ```
-until v=$(gh issue view <n> --json comments -q '[.comments[].body | select(test("^(ACCEPT|CHANGES|AUTO-ACCEPT|AUTO-HOLD)"))] | last' 2>/dev/null) && [ -n "$v" ] && [ "$v" != null ]; do sleep 30; done; echo "$v"
+node <hooks>/proteus-verdict.js <n> --wait
 ```
+
+Trusted means the keyword alone on the first line (`ACCEPTED` is not `ACCEPT`), and the author: `ACCEPT`, `CHANGES` and `ANSWER` count only from the human's login, `AUTO-ACCEPT` and `AUTO-HOLD` from the human's or the agents'. The human's login is `"human"` in `~/.claude/proteus.json`, else the login `gh` is authenticated as. On a public repo anyone can comment; every other author is ignored. Never read a verdict with a raw `gh issue view`.
 
 Read tracker output with `--json … -q` always. A raw `gh issue view` costs the lead more than the ticket did.
 
-Every agent posts as the same GitHub account, so a comment is never edited or overwritten: no `gh … --edit-last`, no `gh api -X PATCH` on a comment. A correction is a new comment. The guards refuse `--edit-last`.
+Every agent posts as the same GitHub account, so a comment is never edited or overwritten: no `gh … --edit-last`, no `gh api -X PATCH` on a comment. A correction is a new comment. The guards refuse `--edit-last`. While that account is also the human's, the verdict script cannot tell an agent's `ACCEPT` from the human's and says `identity=shared` on stderr. So the guards refuse an agent's `gh` comment, PR review or comments API call whose body opens with `ACCEPT`, `CHANGES` or `ANSWER` (inline, heredoc, or `--body-file` under the cwd). That stops a confused or injected agent, not a determined one: a script can still post. Agents posting under a login of their own closes it.
 
 ## Adding a tracker
 
