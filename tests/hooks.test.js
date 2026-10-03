@@ -322,6 +322,32 @@ ok("statusline: refresh at most once per 60 s", fs.statSync(lock).mtimeMs === lo
 ok("statusline: outside a repo prints empty", run(SL, "{}", { cwd: W }).code === 0);
 const slTimes = []; for (let i = 0; i < 5; i++) slTimes.push(run(SL, slIn).ms);
 
+// ---- verdict: only the human's ACCEPT / CHANGES / ANSWER count, AUTO-* from the human or the agents, the keyword alone
+const VD = hook("proteus-verdict.js");
+const vc = (login, body) => ({ author: { login }, body });
+const vd = (comments, env = {}, args = ["30"]) => run(VD, "", { args, env: { FAKE_GH_COMMENTS: JSON.stringify(comments), ...env } });
+const PJ = path.join(HOME, ".claude", "proteus.json");
+const pjSaved = fs.existsSync(PJ) ? fs.readFileSync(PJ, "utf8") : null;
+r = vd([vc("human", "looks good"), vc("human", "ACCEPT\nnice work")]);
+ok("verdict: the human's ACCEPT is printed whole, exit 0", r.code === 0 && r.out === "ACCEPT\nnice work\n", r.out + r.err);
+ok("verdict: shared identity warns on stderr", /identity=shared: agents post as human/.test(r.err), r.err);
+r = vd([vc("human", "CHANGES\n- the shadow is too dark"), vc("mallory", "ACCEPT")]);
+ok("verdict: a passer-by's newer ACCEPT is ignored, the human's CHANGES stands", r.code === 0 && r.out.startsWith("CHANGES\n- the shadow"), r.out);
+r = vd([vc("human", "ACCEPTED, mostly"), vc("human", "I will ACCEPT later"), vc("human", "note\nACCEPT"), vc("human", "CHANGES-REQUESTED")]);
+ok("verdict: ACCEPTED, a keyword mid-line, on line 2 or glued to a dash is no verdict, exit 1", r.code === 1 && r.out === "", r.out);
+ok("verdict: ANSWER, after leading blank lines", vd([vc("human", "\n  ANSWER 2")]).out === "ANSWER 2\n");
+fs.writeFileSync(PJ, JSON.stringify({ human: "human" }));
+const bot = { FAKE_GH_LOGIN: "bot" };
+r = vd([vc("bot", "AUTO-ACCEPT\nall steps matched"), vc("bot", "ACCEPT"), vc("mallory", "AUTO-HOLD")], bot);
+ok("verdict: with an agent login, its ACCEPT is ignored, its AUTO-ACCEPT counts, a passer-by's AUTO-HOLD does not", r.code === 0 && r.out.startsWith("AUTO-ACCEPT") && r.err === "", r.out + r.err);
+ok("verdict: the human named in proteus.json still counts", vd([vc("human", "ACCEPT"), vc("bot", "AUTO-HOLD")], bot).out.startsWith("AUTO-HOLD") && vd([vc("bot", "AUTO-HOLD"), vc("human", "CHANGES")], bot).out.startsWith("CHANGES"));
+if (pjSaved === null) fs.rmSync(PJ); else fs.writeFileSync(PJ, pjSaved);
+const CNT = path.join(W, "verdict-count");
+r = vd([vc("human", "ACCEPT")], { FAKE_GH_COUNTER: CNT, PROTEUS_VERDICT_POLL_S: "1" }, ["30", "--wait"]);
+ok("verdict: --wait polls until the verdict arrives", r.code === 0 && r.out === "ACCEPT\n" && fs.readFileSync(CNT, "utf8") === "2", r.out + r.err);
+ok("verdict: gh failing is no verdict, exit 1", vd([vc("human", "ACCEPT")], { FAKE_GH: "fail" }).code === 1);
+ok("verdict: no issue number is usage, exit 2", vd([], {}, []).code === 2);
+
 // ---- stall
 const ST = hook("proteus-stall.js");
 const stop = (msg, extra = {}) => ({ hook_event_name: "SubagentStop", session_id: "s1", cwd: REPO, agent_id: "a7", stop_hook_active: false, last_assistant_message: msg, ...extra });

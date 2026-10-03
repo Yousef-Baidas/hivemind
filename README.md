@@ -126,6 +126,8 @@ You review through whichever channel fits:
 - **Issue only** — read the brief on GitHub, comment `ACCEPT` or `CHANGES` plus one line per problem. No AI involved.
 - **Evidence only** — flip through the linked screenshots, then comment.
 
+Only comments from your GitHub login count: on a public repo a stranger's `ACCEPT` is ignored, and so is `ACCEPTED`; the keyword stands alone on the first line. If the agents post under an account of their own, name yours as `"human": "<login>"` in `~/.claude/proteus.json`.
+
 `ACCEPT` moves on; `CHANGES` turns each line into a ticket and runs the loop again, or runs revision mode when the changes are small tweaks. Verifier follow-ups never become a pile of tickets: they go on one debt issue per milestone, and at close you fix, re-scope, or drop every line. Merging `proteus/<run>` into `main` is always yours; the lead opens the PR.
 
 ### Overnight
@@ -326,6 +328,7 @@ templates/
     proteus-lessons.js      trigger-based lesson recall
     proteus-stall.js  proteus-worker-guard.js  no waiting on background jobs, one report per agent
     proteus-status.js  proteus-inbox.js  proteus-statusline.js   status, open questions, status line
+    proteus-verdict.js      reads a verdict or answer only from the human's login
     proteus-worktree.js     prepares a worker worktree and its hooks
     proteus-scratch.js      ledgers and sweeps agents' temp files
     proteus-owned-paths.js  commit-msg.js  proteus-lib.js   shared core

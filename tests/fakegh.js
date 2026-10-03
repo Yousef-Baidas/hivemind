@@ -1,9 +1,17 @@
 #!/usr/bin/env node
-// fake gh for the hook tests: canned JSON by argument pattern; FAKE_GH=fail → exit 1
+// fake gh for the hook tests: canned JSON by argument pattern; FAKE_GH=fail → exit 1. FAKE_GH_LOGIN is the authenticated
+// login (default human), FAKE_GH_COMMENTS the comments of issue 30; with FAKE_GH_COUNTER (a file) its first view has none
 const a = process.argv.slice(2).join(" ");
 if (process.env.FAKE_GH === "fail") { process.stderr.write("gh: no remote\n"); process.exit(1); }
 const out = (o) => { process.stdout.write(JSON.stringify(o)); process.exit(0); };
 const iso = (h) => new Date(Date.UTC(2026, 8, 1) + h * 3600e3).toISOString();
+if (/^api user --jq \.login$/.test(a)) { process.stdout.write((process.env.FAKE_GH_LOGIN || "human") + "\n"); process.exit(0); }
+if (/issue view 30 --json comments/.test(a)) {
+  const fs = require("fs"), c = process.env.FAKE_GH_COUNTER;
+  const n = c ? (parseInt(fs.existsSync(c) ? fs.readFileSync(c, "utf8") : "0", 10) || 0) + 1 : 2;
+  if (c) fs.writeFileSync(c, String(n));
+  out({ comments: n === 1 ? [] : JSON.parse(process.env.FAKE_GH_COMMENTS || "[]") });
+}
 if (/issue list --label proteus-log/.test(a)) out([{ number: 7, title: "Run: bl1077" }]);
 if (/issue view 7 --json comments/.test(a)) out({ comments: Array.from({ length: 15 }, (_, i) => ({ body: `decision ${i + 1}: ` + "x".repeat(i === 14 ? 50 : 300) })) });
 if (/issue list --label needs-human/.test(a)) out([
